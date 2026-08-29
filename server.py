@@ -2035,10 +2035,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <span class="sticky-stat-pill">🎛️ Inst: <strong id="sticky-inst-pct">0%</strong></span>
         </div>
         <div class="sticky-actions-group">
-            <button class="sticky-action-btn" onclick="openSCurveModal()">📈 Kurva-S</button>
-            <button class="sticky-action-btn" onclick="openWaSummaryModal()">📱 WA Summary</button>
-            <button class="sticky-action-btn" onclick="openReportModal()">📑 Laporan</button>
-            <button class="sticky-action-btn" onclick="downloadExcel()">📥 Excel</button>
+            <button class="sticky-action-btn" onclick="openReportModal()">📑 Menu Laporan & Tools</button>
             <button class="sticky-action-btn" onclick="scrollToTop()">▲ Atas</button>
         </div>
     </div>
@@ -2135,10 +2132,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px; flex-shrink: 0;">
-                <button class="page-btn" onclick="downloadExcel()" style="color:var(--primary); font-weight:700; margin-right:auto;">📥 Unduh Excel (.xlsx)</button>
-                <button class="page-btn" onclick="closeReportModal()">Tutup</button>
-                <button class="btn-save" onclick="printReportModal()">🖨️ Cetak / Simpan PDF</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px; flex-shrink: 0;">
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="page-btn" onclick="openSCurveModal()" style="font-weight:700;">📈 Kurva-S & Tren</button>
+                    <button class="page-btn" onclick="openWaSummaryModal()" style="font-weight:700; color:#10b981; border-color:rgba(16,185,129,0.4);">📱 Format WA</button>
+                    <button class="page-btn" onclick="downloadExcel()" style="color:var(--primary); font-weight:700;">📥 Unduh Excel (.xlsx)</button>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="page-btn" onclick="closeReportModal()">Tutup</button>
+                    <button class="btn-save" onclick="printReportModal()">🖨️ Cetak / Simpan PDF</button>
+                </div>
             </div>
         </div>
     </div>
@@ -2197,9 +2200,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Ganti Tema Terang / Gelap">
                 <span id="theme-icon">🌙</span> <span id="theme-text">Dark Mode</span>
             </button>
-            <button class="page-btn" onclick="openSCurveModal()" title="Lihat Kurva-S & Tren Progress Outage" style="font-weight:700;">📈 Kurva-S</button>
-            <button class="page-btn" onclick="openWaSummaryModal()" title="Salin Ringkasan Format WhatsApp" style="font-weight:700; color:#10b981; border-color:rgba(16,185,129,0.4);">📱 Format WA</button>
-            <button class="page-btn" onclick="downloadExcel()" title="Download File Excel Terkini" style="font-weight:700; color:var(--primary);">📥 Unduh Excel</button>
             <button class="btn-print" onclick="openReportModal()" title="Buka Laporan Outage / Export PDF">📑 Laporan Outage / PDF</button>
             <div class="unit-switcher">
                 <button class="unit-btn active" id="btn-unit-1" onclick="switchUnit(1)">UNIT 1</button>
@@ -2457,6 +2457,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('tab-cnt-wo').innerText = (fullData.work_orders || []).length;
             document.getElementById('tab-cnt-act').innerText = (fullData.actuators || []).length;
             document.getElementById('tab-cnt-inst').innerText = s.instrument.total;
+
+            // Update Sticky Summary Bar
+            const uNum = document.getElementById('sticky-unit-num');
+            const gPct = document.getElementById('sticky-grand-pct');
+            const wPct = document.getElementById('sticky-wo-pct');
+            const aPct = document.getElementById('sticky-act-pct');
+            const iPct = document.getElementById('sticky-inst-pct');
+            if(uNum) uNum.innerText = currentUnit;
+            if(gPct) gPct.innerText = `${s.grand_pct}%`;
+            if(wPct) wPct.innerText = `${s.wo.pct}%`;
+            if(aPct) aPct.innerText = `${s.actuator.pct}%`;
+            if(iPct) iPct.innerText = `${s.instrument.pct}%`;
         }
 
         function populateFilterDropdowns() {
@@ -5114,7 +5126,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             msg += `📅 *Tanggal:* ${todayStr}\n\n`;
 
             msg += `📊 *RINGKASAN PROGRESS:*\n`;
-            msg += `▪ *Grand Progress:* *${s.grand.pct}%* (${s.grand.finish_items}/${s.grand.total_items} Selesai)\n`;
+            msg += `▪ *Grand Progress:* *${s.grand_pct}%* (${s.grand_done}/${s.grand_total} Sub-task Selesai)\n`;
             msg += `▪ *Work Orders:* ${s.wo.pct}% (${s.wo.finish}/${s.wo.total} WO Finish &bull; ${s.wo.subtask_done}/${s.wo.subtask_total} Sub-task)\n`;
             msg += `▪ *Actuator Valves:* ${s.actuator.pct}% (${s.actuator.finish}/${s.actuator.total} Valve Finish)\n`;
             msg += `▪ *Instruments:* ${s.instrument.pct}% (${s.instrument.done}/${s.instrument.total} Verifikasi OK)\n\n`;
@@ -5162,23 +5174,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
-        // Update Sticky Bar stats when loading data
-        const origUpdateSummaryUI = updateSummaryUI;
-        updateSummaryUI = function() {
-            origUpdateSummaryUI.apply(this, arguments);
-            if(!fullData || !fullData.summary) return;
-            const s = fullData.summary;
-            const uNum = document.getElementById('sticky-unit-num');
-            const gPct = document.getElementById('sticky-grand-pct');
-            const wPct = document.getElementById('sticky-wo-pct');
-            const aPct = document.getElementById('sticky-act-pct');
-            const iPct = document.getElementById('sticky-inst-pct');
-            if(uNum) uNum.innerText = currentUnit;
-            if(gPct) gPct.innerText = `${s.grand.pct}%`;
-            if(wPct) wPct.innerText = `${s.wo.pct}%`;
-            if(aPct) aPct.innerText = `${s.actuator.pct}%`;
-            if(iPct) iPct.innerText = `${s.instrument.pct}%`;
-        };
         function initTheme() {
             const saved = localStorage.getItem('eic_theme') || 'dark';
             setTheme(saved);
