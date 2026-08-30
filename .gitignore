@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller build artifacts (keep server.exe and server.spec)
+build/
+*.manifest
+
+# Scratch scripts
+scratch/
+
+# Temporary system artifacts
+.tempmediaStorage/
+.system_generated/
+*.log
+
+# Operating System Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

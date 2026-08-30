@@ -387,28 +387,38 @@ def is_same_component(comp_desc, comp_kks, st_desc):
     comp_desc_upper = str(comp_desc or '').replace('\xa0', ' ').strip().upper()
     
     st_kks = extract_kks(st_desc_upper)
+    comp_extracted_kks = extract_kks(comp_desc_upper) or comp_kks
     
-    # 1. KKS Match
+    # 1. KKS Match (Direct or ignoring leading Unit digit 10 vs 20)
     if comp_kks and st_kks:
         if comp_kks == st_kks or comp_kks[2:] == st_kks[2:]:
             return True
-    if comp_kks and len(comp_kks) >= 6 and comp_kks in st_desc_upper:
-        return True
-        
-    # 2. Text Match
-    if comp_desc_upper and (comp_desc_upper in st_desc_upper or st_desc_upper in comp_desc_upper):
-        return True
-        
-    norm_comp = re.sub(r'^(ACTUATOR|VALVE|MOV|AOV|UNIT \d+|MSW)\s*', '', comp_desc_upper).strip()
-    norm_st = re.sub(r'^(ACTUATOR|VALVE|MOV|AOV|UNIT \d+|MSW|[0-9]{1,2}[A-Z]{3}[0-9]{2}[A-Z]{1,2}[0-9]{1,3}[:\s]*)\s*', '', st_desc_upper).strip()
-    
-    if norm_comp and norm_st and norm_comp == norm_st:
-        return True
-        
-    if len(norm_comp) > 10 and len(norm_st) > 10:
-        ratio = difflib.SequenceMatcher(None, norm_comp, norm_st).ratio()
-        if ratio > 0.85:
+    if comp_extracted_kks and st_kks:
+        if comp_extracted_kks == st_kks or comp_extracted_kks[2:] == st_kks[2:]:
             return True
+    if comp_kks and len(comp_kks) >= 6 and (comp_kks in st_desc_upper or comp_kks[2:] in st_desc_upper):
+        return True
+    if st_kks and len(st_kks) >= 6 and (st_kks in comp_desc_upper or st_kks[2:] in comp_desc_upper):
+        return True
+        
+    # 2. Text Match (normalizing keywords like DRAUGHT -> DRAFT, etc.)
+    def normalize_text(t):
+        t = re.sub(r'[\xa0\s]+', ' ', t).strip()
+        t = t.replace('DRAUGHT', 'DRAFT')
+        t = re.sub(r'^(ACTUATOR|VALVE|MOV|AOV|UNIT \d+|MSW|[0-9]{1,2}[A-Z]{3}[0-9]{2}[A-Z]{1,2}[0-9]{1,3}[:\s]*)\s*', '', t).strip()
+        t = re.sub(r'\s*(ACTUATOR|VALVE|MOV|AOV|[0-9]{1,2}[A-Z]{3}[0-9]{2}[A-Z]{1,2}[0-9]{1,3})\s*$', '', t).strip()
+        return t
+
+    norm_comp = normalize_text(comp_desc_upper)
+    norm_st = normalize_text(st_desc_upper)
+    
+    if norm_comp and norm_st:
+        if norm_comp == norm_st or norm_comp in norm_st or norm_st in norm_comp:
+            return True
+        if len(norm_comp) > 8 and len(norm_st) > 8:
+            ratio = difflib.SequenceMatcher(None, norm_comp, norm_st).ratio()
+            if ratio > 0.8:
+                return True
             
     return False
 
@@ -1289,6 +1299,8 @@ def save_wo_update(data):
                         else:
                             row[2].value = None
                         if "pic_task" in c_data: row[3].value = normalize_pic(c_data["pic_task"])
+                        # Sync sub-task to ActuatorValve and Instruments
+                        sync_subtask_to_components(wb, no_wo, sub_desc, is_done, row[2].value)
 
         if "WorkOrder_Checklist" in wb.sheetnames:
             ws_chk = wb["WorkOrder_Checklist"]
@@ -1772,39 +1784,52 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         header {
             background: var(--bg-header);
             border-bottom: 1px solid var(--border-color);
-            padding: 16px 32px;
-            display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 32px;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 16px;
             position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px);
             transition: background 0.25s, border-color 0.25s;
         }
-        .logo-area { display: flex; align-items: center; gap: 14px; }
+        .logo-area { display: flex; align-items: center; justify-self: start; }
         .logo-badge {
             background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
-            padding: 9px 16px; border-radius: var(--radius-md); font-weight: 800; color: #fff;
-            font-size: 0.95rem; letter-spacing: 0.5px; box-shadow: var(--shadow-glow);
-            display: flex; align-items: center; gap: 8px;
+            padding: 8px 14px; border-radius: var(--radius-md); font-weight: 800; color: #fff;
+            font-size: 0.92rem; letter-spacing: 0.5px; box-shadow: var(--shadow-glow);
+            display: flex; align-items: center; gap: 8px; white-space: nowrap;
+            cursor: pointer; user-select: none; transition: transform 0.18s, box-shadow 0.18s, opacity 0.18s;
         }
-        .title-group h1 { font-size: 1.25rem; font-weight: 800; color: var(--text-main); letter-spacing: -0.3px; }
-        .title-group p { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }
+        .logo-badge:hover {
+            transform: translateY(-1px) scale(1.02);
+            box-shadow: 0 4px 16px rgba(56, 189, 248, 0.4);
+            opacity: 0.95;
+        }
+        .logo-badge:active {
+            transform: scale(0.97);
+        }
+        .title-group { text-align: center; justify-self: center; }
+        .title-group h1 { font-size: 1.25rem; font-weight: 800; color: var(--text-main); letter-spacing: -0.3px; margin: 0; }
+        .title-group p { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; margin: 2px 0 0 0; }
 
-        .header-controls { display: flex; align-items: center; gap: 10px; }
+        .header-controls { display: flex; align-items: center; gap: 10px; justify-self: end; }
         .unit-switcher { display: flex; background: var(--bg-sub); border-radius: var(--radius-md); padding: 4px; border: 1px solid var(--border-color); }
         .unit-btn { padding: 8px 22px; border: none; background: transparent; color: var(--text-muted); font-weight: 700; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s; font-size: 0.88rem; }
         .unit-btn.active { background: var(--primary); color: #fff; box-shadow: 0 2px 12px var(--primary-glow); }
         
         .theme-toggle-btn {
-            padding: 8px 14px;
+            padding: 8px 12px;
             background: var(--bg-sub);
             border: 1px solid var(--border-color);
             color: var(--text-main);
             border-radius: var(--radius-md);
             font-weight: 700;
-            font-size: 0.84rem;
+            font-size: 1rem;
             cursor: pointer;
             transition: all 0.2s;
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 6px;
+            justify-content: center;
             user-select: none;
         }
         .theme-toggle-btn:hover {
@@ -2594,21 +2619,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <!-- Header -->
     <header>
         <div class="logo-area">
-            <div class="logo-badge">⚡ PLTU MSW EIC</div>
-            <div class="title-group">
-                <h1>Outage Work Order Monitoring System</h1>
-                <p>Section Electric, Instrument & Control &bull; Real-Time Dashboard</p>
-            </div>
+            <div class="logo-badge" onclick="window.location.reload()" title="🔄 Klik untuk Refresh Halaman">⚡ PLTU MSW EIC</div>
+        </div>
+        <div class="title-group">
+            <h1>Outage Work Order Monitoring System</h1>
+            <p>Section Electric, Instrument & Control &bull; Real-Time Dashboard</p>
         </div>
         <div class="header-controls">
             <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Ganti Tema Terang / Gelap">
-                <span id="theme-icon">🌙</span> <span id="theme-text">Dark Mode</span>
+                <span id="theme-icon" style="font-size:1.1rem; line-height:1;">🌙</span>
             </button>
-            <button class="btn-print" onclick="openReportModal()" title="Buka Laporan Outage / Export PDF">📑 Laporan Outage / PDF</button>
-            <div class="unit-switcher">
-                <button class="unit-btn active" id="btn-unit-1" onclick="switchUnit(1)">UNIT 1</button>
-                <button class="unit-btn" id="btn-unit-2" onclick="switchUnit(2)">UNIT 2</button>
-            </div>
+            <button class="btn-print" onclick="openReportModal()" title="Buka Report / Export PDF">📑 Report</button>
         </div>
     </header>
 
@@ -2617,7 +2638,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- Outage Banner & Progress -->
         <div class="outage-banner">
             <div class="outage-info">
-                <span class="outage-badge">🔥 Outage Active</span>
+                <div class="unit-switcher">
+                    <button class="unit-btn active" id="btn-unit-1" onclick="switchUnit(1)">UNIT 1</button>
+                    <button class="unit-btn" id="btn-unit-2" onclick="switchUnit(2)">UNIT 2</button>
+                </div>
                 <div>
                     <div class="outage-title" id="outage-unit-title">Monitoring Progress Outage EIC Unit 1</div>
                     <div style="font-size:0.8rem; color:var(--text-muted);">Terintegrasi otomatis dengan Template Excel & Folder Temuan</div>
@@ -2700,7 +2724,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <!-- Quick Filter Chips & Side Item Counter -->
                     <div class="filter-pills" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                            <span style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-right:4px;">Filter Cepat:</span>
                             <button class="pill-btn active" id="pill-all" onclick="setQuickFilter('all')">Semua Item</button>
                             <button class="pill-btn" id="pill-findings" onclick="setQuickFilter('findings')">🚨 Ada Temuan / Foto</button>
                             <button class="pill-btn" id="pill-inprog" onclick="setQuickFilter('inprog')">⏳ In Progress</button>
@@ -2709,10 +2732,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <div id="side-pagination-counter" style="margin-left:auto; display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:600; color:var(--text-muted); background:var(--bg-sub); padding:4px 12px; border-radius:20px; border:1px solid var(--border-color);">
                             <span>Menampilkan <strong style="color:var(--primary);" id="side-item-range">0 - 0</strong> dari <strong style="color:var(--text-main);" id="side-item-total">0</strong> item</span>
                             <select id="side-page-size-select" class="filter-input" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; margin-left:4px;" onchange="changePageSize(this.value)">
-                                <option value="10">10 / hal</option>
-                                <option value="25">25 / hal</option>
-                                <option value="50">50 / hal</option>
-                                <option value="1000">Semua</option>
+                                <option value="20" selected>20 / hal</option>
+                                <option value="40">40 / hal</option>
+                                <option value="99999">Semua</option>
                             </select>
                         </div>
                     </div>
@@ -2736,7 +2758,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let fullData = null;
         let matrixData = null;
         let currentPage = 1;
-        let pageSize = 10;
+        let pageSize = 20;
         let editModeState = {};
         let activeFinding = null;
 
@@ -3069,10 +3091,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
 
             if(currentViewMode === 'cards') {
-                if(openCardIds.size === 0 && pageItems.length > 0) {
-                    const firstBodyId = getCardBodyId('wo', pageItems[0].no_wo || 0);
-                    openCardIds.add(firstBodyId);
-                }
                 html += '<div class="card-list">';
                 pageItems.forEach((item, idx) => {
                     const st = String(item.status || 'SCHED-OK').replace(/\s+/g, '_');
@@ -3340,10 +3358,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
 
             if(currentViewMode === 'cards') {
-                if(openCardIds.size === 0 && pageItems.length > 0) {
-                    const firstBodyId = getCardBodyId('wo', pageItems[0].no_wo || 0);
-                    openCardIds.add(firstBodyId);
-                }
                 html += '<div class="card-list">';
                 pageItems.forEach((item, idx) => {
                     const st = String(item.status || 'SCHED-OK').replace(/\s+/g, '_');
@@ -3565,10 +3579,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
 
             if(currentViewMode === 'cards') {
-                if(openCardIds.size === 0 && pageItems.length > 0) {
-                    const firstBodyId = getCardBodyId('wo', pageItems[0].no_wo || 0);
-                    openCardIds.add(firstBodyId);
-                }
                 html += '<div class="card-list">';
                 pageItems.forEach((item, idx) => {
                     const title = (instSubtab==='psw' ? item.description : item.equipment) || `Item #${item.no}`;
@@ -4797,12 +4807,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         /* ---------------- QUICK ACTIONS (NO AUTO REFRESH) ---------------- */
-        function toggleLocalSubtask(noWo, cIdx, isChecked) {
+        async function toggleLocalSubtask(noWo, cIdx, isChecked) {
             const item = (fullData.work_orders || []).find(w => w.no_wo === noWo);
             if(!item || !item.checklist || !item.checklist[cIdx]) return;
             
+            const subTaskDesc = item.checklist[cIdx].sub_task;
             item.checklist[cIdx].selesai = isChecked;
-            const nowStr = new Date().toLocaleDateString('id-ID');
+            const nowStr = getTodayFormatted();
             item.checklist[cIdx].tanggal = isChecked ? nowStr : '';
             
             const chkItemEl = document.getElementById(`chk-${noWo}-${cIdx}`)?.closest('.checklist-item');
@@ -4814,14 +4825,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     spanEl.style.color = isChecked ? 'var(--text-muted)' : 'var(--text-main)';
                     spanEl.style.opacity = isChecked ? '0.65' : '1';
                 }
-                const rightBox = chkItemEl.querySelector('.header-right');
+                const rightBox = chkItemEl.querySelector('.checklist-footer-right') || chkItemEl.querySelector('.header-right');
                 let dateBadge = rightBox?.querySelector('.date-badge');
                 if(isChecked) {
                     if(!dateBadge && rightBox) {
                         const badge = document.createElement('span');
                         badge.className = 'date-badge';
                         badge.title = "Tanggal Dikerjakan";
-                        badge.innerText = `${nowStr}`;
+                        badge.style.cssText = "font-size:0.72rem; color:var(--status-finish); font-family:'JetBrains Mono',monospace; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:2px 7px; border-radius:4px;";
+                        badge.innerText = `📅 ${nowStr}`;
                         const delBtn = rightBox.querySelector('.btn-del-subtask-cross');
                         rightBox.insertBefore(badge, delBtn);
                     }
@@ -4836,30 +4848,43 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             item.persen_progress = pct;
             item.status = (done === total && total > 0) ? 'FINISH' : (done > 0 ? 'IN PROGRESS' : 'SCHED-OK');
             
-            // Update UI
-            const woIdx = (fullData.work_orders || []).indexOf(item);
-            const bodyId = getCardBodyId('wo', noWo);
-            const bodyEl = document.getElementById(bodyId) || document.getElementById(`body-wo-${woIdx}`);
-            if(bodyEl) {
-                const secH4 = bodyEl.querySelector('.section-h4');
-                if(secH4) secH4.innerText = `📋 Checklist Sub-Task (${done} / ${total} Selesai)`;
+            // Update card elements
+            const headerEl = document.getElementById(`card-wo-${noWo}`)?.querySelector('.item-header');
+            if(headerEl) {
+                const subCountEl = headerEl.querySelector('.wo-subtask-progress');
+                if(subCountEl) subCountEl.innerText = `${done} / ${total} Sub-task`;
+                const barFill = headerEl.querySelector('.progress-fill');
+                if(barFill) barFill.style.width = `${pct}%`;
+                const pctText = headerEl.querySelector('.progress-text');
+                if(pctText) pctText.innerText = `${pct}%`;
                 
-                const headerEl = document.getElementById(`card-wo-${noWo}`)?.querySelector('.item-header');
-                if(headerEl) {
-                    const subCountEl = headerEl.querySelector('.wo-subtask-progress');
-                    if(subCountEl) subCountEl.innerText = `${done} / ${total} Sub-task`;
-                    const barFill = headerEl.querySelector('.progress-fill');
-                    if(barFill) barFill.style.width = `${pct}%`;
-                    const pctText = headerEl.querySelector('.progress-text');
-                    if(pctText) pctText.innerText = `${pct}%`;
-                    
-                    const badgeEl = headerEl.querySelector('.status-badge');
-                    if(badgeEl) {
-                        const st = item.status.replace(/\s+/g, '_');
-                        badgeEl.className = `status-badge badge-${st}`;
-                        badgeEl.innerText = item.status;
-                    }
+                const badgeEl = headerEl.querySelector('.status-badge');
+                if(badgeEl) {
+                    const st = item.status.replace(/\s+/g, '_');
+                    badgeEl.className = `status-badge badge-${st}`;
+                    badgeEl.innerText = item.status;
                 }
+            }
+            
+            // Send background sync request to server so Excel & Actuator/Instrument sync immediately
+            try {
+                const res = await fetch('/api/quick_toggle_subtask', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        unit: currentUnit,
+                        no_wo: noWo,
+                        sub_task: subTaskDesc,
+                        sub_idx: cIdx,
+                        selesai: isChecked
+                    })
+                });
+                const result = await res.json();
+                if(result.status === 'success') {
+                    showToast(`✓ Sub-task & komponen terkait disinkronkan (${result.persen_progress}%)`, 'success', 1500);
+                }
+            } catch(err) {
+                console.error("Error saving quick subtask toggle:", err);
             }
         }
 
@@ -5799,15 +5824,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.documentElement.setAttribute('data-theme', theme);
             localStorage.setItem('eic_theme', theme);
             const icon = document.getElementById('theme-icon');
-            const text = document.getElementById('theme-text');
-            if(icon && text) {
-                if(theme === 'light') {
-                    icon.innerText = '☀️';
-                    text.innerText = 'Light Mode';
-                } else {
-                    icon.innerText = '🌙';
-                    text.innerText = 'Dark Mode';
-                }
+            if(icon) {
+                icon.innerText = (theme === 'light') ? '☀️' : '🌙';
+            }
+            const btn = document.getElementById('theme-toggle-btn');
+            if(btn) {
+                btn.title = (theme === 'light') ? 'Ganti ke Dark Mode' : 'Ganti ke Light Mode';
             }
         }
 
