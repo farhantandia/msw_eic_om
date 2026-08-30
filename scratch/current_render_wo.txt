@@ -1,0 +1,289 @@
+function renderWorkOrders(container) {
+            const searchStr = document.getElementById('search-input').value.toLowerCase();
+            const statusFilter = document.getElementById('filter-status').value;
+            const picFilter = document.getElementById('filter-pic').value;
+            const areaFilter = document.getElementById('filter-area').value;
+
+            let filteredItems = (fullData.work_orders || []).filter(w => 
+                filterItem(w, searchStr, statusFilter, picFilter, areaFilter, 'no_wo', 'job_description', 'status', 'pic', 'area')
+            );
+
+            const isAddWoOpen = openCardIds.has('add-wo-form');
+            let html = '';
+            html += `
+            <div style="background: linear-gradient(135deg, rgba(6,182,212,0.12) 0%, rgba(245,158,11,0.12) 100%); border: 1px solid rgba(56,189,248,0.3); border-radius: 10px; padding: 12px 18px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="font-size:1.4rem;">⚙️📟</span>
+                    <div>
+                        <div style="font-size:0.9rem; font-weight:700; color:var(--text-main);">Sinkronisasi Dua Arah & Dropdown Komponen Aktif!</div>
+                        <div style="font-size:0.8rem; color:var(--text-muted);">Centang subtask Actuator/Instrument di WO akan otomatis mengupdate tab Actuator & Instrument, dan sebaliknya. Klik kartu WO untuk melihat checklist & dropdown selector.</div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <span class="badge-tag-comp badge-tag-act">⚙️ 92 Actuator Tersinkron</span>
+                    <span class="badge-tag-comp badge-tag-inst">📟 153 Instrument Tersinkron</span>
+                </div>
+            </div>`;
+
+            html += `
+            <div style="margin-bottom:20px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
+                <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-wo-form')">
+                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700;">➕ Tambah Work Order (WO) Baru</h3>
+                    <span id="arrow-add-wo-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddWoOpen ? '▲ Tutup Form' : '▼ Buka Form'}</span>
+                </div>
+                <div id="add-wo-form" class="accordion-form ${isAddWoOpen ? 'open' : ''}" style="${isAddWoOpen ? 'display:block;' : ''}">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>No Work Order (WO) <span style="color:#f43f5e;">*</span></label>
+                            <input type="text" id="new-wo-code" class="filter-input" placeholder="mis. WO-100826-0099">
+                        </div>
+                        <div class="form-group">
+                            <label>Job Description <span style="color:#f43f5e;">*</span></label>
+                            <input type="text" id="new-wo-desc" class="filter-input" placeholder="Deskripsi pekerjaan WO...">
+                        </div>
+                        <div class="form-group">
+                            <label>Area System</label>
+                            <input type="text" id="new-wo-area" class="filter-input" placeholder="BOILER, ID FAN, COOLING TOWER...">
+                        </div>
+                        <div class="form-group">
+                            <label>PIC Penanggung Jawab</label>
+                            <select id="new-wo-pic" class="filter-input">
+                                <option value="">Pilih PIC...</option>
+                                ${(fullData.pics || []).map(p => `<option value="${p}">${p}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Tanggal Schedule</label>
+                            <input type="date" id="new-wo-sched" class="filter-input">
+                        </div>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Checklist Sub-task (Pisahkan dengan koma atau baris baru)</label>
+                            <textarea id="new-wo-checklist" class="textarea-full" placeholder="mis. General Inspection, Cleaning Contact, Function Test, Tightening Bolt"></textarea>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:10px; margin-top:14px;">
+                        <button class="btn-save" onclick="saveNewWO()">💾 Simpan Work Order Baru</button>
+                        <button class="page-btn" onclick="toggleAccordion('add-wo-form')">Batal</button>
+                    </div>
+                </div>
+            </div>`;
+
+            html += renderPaginationControls(filteredItems.length);
+
+            if(filteredItems.length === 0) {
+                html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">Tidak ada Work Order yang sesuai dengan filter pencarian.</div>';
+                container.innerHTML = html;
+                return;
+            }
+
+            const startIndex = (currentPage - 1) * pageSize;
+            const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
+
+            if(currentViewMode === 'cards') {
+                if(openCardIds.size === 0 && pageItems.length > 0) {
+                    const firstBodyId = getCardBodyId('wo', pageItems[0].no_wo || 0);
+                    openCardIds.add(firstBodyId);
+                }
+                html += '<div class="card-list">';
+                pageItems.forEach((item, idx) => {
+                    const st = String(item.status || 'SCHED-OK').replace(/\s+/g, '_');
+                    const hasFindings = !!item.temuan || (item.jumlah_foto > 0);
+                    const doneCount = (item.checklist || []).filter(c => c.selesai).length;
+                    const totalCount = item.checklist ? item.checklist.length : 0;
+                    const bodyId = getCardBodyId('wo', item.no_wo || idx);
+                    const isOpen = openCardIds.has(bodyId);
+
+                    html += `
+                    <div class="item-card" id="card-wo-${item.no_wo}">
+                        <div class="item-header" onclick="toggleAccordion('${bodyId}')">
+                            <div class="item-title-box">
+                                <div class="item-code">${item.no_wo} &bull; ${item.area || 'GENERAL'} ${item.tanggal_finish ? '&bull; 🏁 Selesai: ' + item.tanggal_finish : ''}</div>
+                                <div class="item-name">${item.job_description}</div>
+                            </div>
+                            <div class="header-actions">
+                                <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('wo', '${item.no_wo}', '${item.no_wo} - ${item.job_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
+                                    📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Temuan' : '+ Temuan')}
+                                </button>
+                                <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">👤 ${item.pic || '-'}</span>
+                                <span class="wo-subtask-progress" style="font-size:0.82rem; font-weight:700; color:var(--text-muted);">${doneCount} / ${totalCount} Sub-task</span>
+                                <span class="status-badge badge-${st}">${item.status}</span>
+                                <div class="progress-box">
+                                    <div class="progress-bar-bg"><div class="progress-bar-fill progress-fill" style="width:${item.persen_progress}%;"></div></div>
+                                    <span class="progress-text" style="font-size:0.85rem; font-weight:800; font-family:'JetBrains Mono';">${item.persen_progress}%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="item-body ${isOpen ? 'open' : ''}" id="${bodyId}" style="${isOpen ? 'display:block;' : ''}">
+                            <div class="checklist-section">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                                    <div class="section-h4" style="margin-bottom:0;">📋 Checklist Sub-Task (${doneCount} / ${totalCount} Selesai)</div>
+                                    ${totalCount > 0 ? `
+                                        <div style="display:flex; gap:6px;">
+                                            <button class="btn-batch-check" onclick="batchToggleSubtasks('${item.no_wo}', 'mark_all_done')" title="Tandai semua sub-task selesai">✓ Selesai Semua</button>
+                                            <button class="btn-batch-reset" onclick="batchToggleSubtasks('${item.no_wo}', 'reset_all')" title="Reset semua sub-task">↺ Reset</button>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <div class="checklist-grid">
+                                    ${(item.checklist || []).map((c, cIdx) => {
+                                        const typeBadge = getSubtaskTypeBadge(c.sub_task);
+                                        return `
+                                        <div class="checklist-item ${c.selesai ? 'done' : ''}">
+                                            <div class="checklist-item-header">
+                                                <div class="header-left">
+                                                    ${typeBadge}
+                                                </div>
+                                                <div class="header-right">
+                                                    ${c.tanggal ? `<span class="date-badge" style="font-size:0.7rem; color:var(--status-finish); font-family:'JetBrains Mono',monospace; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); padding:1px 6px; border-radius:3px;" title="Tanggal Dikerjakan">${c.tanggal}</span>` : ''}
+                                                    <button class="btn-del-subtask-cross" title="Hapus Subtask" onclick="deleteSubtask('${item.no_wo}', '${(c.sub_task||'').toString().replace(/'/g, "\\'")}')" aria-label="Hapus">&times;</button>
+                                                </div>
+                                            </div>
+                                            <label class="checklist-item-body">
+                                                <input type="checkbox" id="chk-${item.no_wo}-${cIdx}" ${c.selesai ? 'checked' : ''} onchange="toggleLocalSubtask('${item.no_wo}', ${cIdx}, this.checked)">
+                                                <span>${c.sub_task}</span>
+                                            </label>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
+                                
+                                <div style="margin-top:14px; background:rgba(0,0,0,0.2); border:1px solid var(--border-color); border-radius:8px; padding:10px 12px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                                        <span style="font-size:0.78rem; font-weight:700; color:var(--text-muted);">➕ Tambah Sub-task ke WO:</span>
+                                        <div style="display:flex; gap:5px;">
+                                            <button type="button" class="comp-mode-btn btn-mode-manual ${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'manual')">✏️ Manual</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-act ${subtaskAddModes[item.no_wo]==='actuator'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'actuator')">⚙️ Pilih Actuator (${(fullData.master_actuators||fullData.actuators||[]).length})</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-inst ${subtaskAddModes[item.no_wo]==='instrument'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'instrument')">📟 Pilih Instrument (${((fullData.pressure_tx||[]).length + (fullData.temperature_tx||[]).length + (fullData.pressure_switch||[]).length)})</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Mode 1: Manual Input -->
+                                    <div id="box-subtask-manual-${item.no_wo}" style="display:${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'flex':'none'}; gap:8px;">
+                                        <input type="text" id="new-subtask-${item.no_wo}" class="filter-input" placeholder="Ketik deskripsi sub-task (mis. INSPECTION FRAME MOTOR)..." style="flex-grow:1; font-size:0.82rem;">
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap;" onclick="addSubtask('${item.no_wo}', 'manual')">➕ Tambah</button>
+                                    </div>
+
+                                    <!-- Mode 2: Actuator Dropdown Picker -->
+                                    <div id="box-subtask-act-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='actuator'?'flex':'none'}; gap:8px;">
+                                        <select id="new-subtask-act-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
+                                            <option value="">-- Pilih Actuator Valve dari Master List --</option>
+                                            ${(fullData.master_actuators || fullData.actuators || []).map(a => `
+                                                <option value="${a.equipment_description} ${a.kks||''}">[${a.area}] ${a.equipment_description} ${a.kks ? '('+a.kks+')' : ''}</option>
+                                            `).join('')}
+                                        </select>
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#f59e0b; border-color:#d97706; color:#000;" onclick="addSubtask('${item.no_wo}', 'actuator')">⚙️ Tambah Actuator</button>
+                                    </div>
+
+                                    <!-- Mode 3: Instrument Dropdown Picker -->
+                                    <div id="box-subtask-inst-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='instrument'?'flex':'none'}; gap:8px;">
+                                        <select id="new-subtask-inst-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
+                                            <option value="">-- Pilih Instrument dari Master List (PT/TT/PS) --</option>
+                                            <optgroup label="Pressure Transmitter (PTX)">
+                                                ${(fullData.pressure_tx || []).map(p => `
+                                                    <option value="${p.kks ? p.kks+': ' : ''}${p.equipment}">[PTX - ${p.area}] ${p.kks ? p.kks+' : ' : ''}${p.equipment}</option>
+                                                `).join('')}
+                                            </optgroup>
+                                            <optgroup label="Temperature Transmitter (TTX)">
+                                                ${(fullData.temperature_tx || []).map(t => `
+                                                    <option value="${t.kks ? t.kks+': ' : ''}${t.equipment}">[TTX - ${t.area}] ${t.kks ? t.kks+' : ' : ''}${t.equipment}</option>
+                                                `).join('')}
+                                            </optgroup>
+                                            <optgroup label="Pressure Switch (PSW)">
+                                                ${(fullData.pressure_switch || []).map(s => `
+                                                    <option value="${s.kks ? s.kks+': ' : ''}${s.equipment}">[PSW - ${s.area}] ${s.kks ? s.kks+' : ' : ''}${s.equipment}</option>
+                                                `).join('')}
+                                            </optgroup>
+                                        </select>
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#06b6d4; border-color:#0891b2; color:#000;" onclick="addSubtask('${item.no_wo}', 'instrument')">📟 Tambah Instrument</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>PIC Penanggung Jawab</label>
+                                    <select id="pic-${item.no_wo}" class="filter-input">
+                                        <option value="">Pilih PIC...</option>
+                                        ${fullData.pics.map(p => `<option value="${p}" ${item.pic===p?'selected':''}>${p}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Tanggal Selesai (Finish Date)</label>
+                                    <input type="date" id="finish-wo-${item.no_wo}" class="filter-input" value="${formatDateForInput(item.tanggal_finish)}">
+                                </div>
+                                <div class="form-group" style="grid-column: span 2;">
+                                    <label>Remarks / Catatan Lapangan</label>
+                                    <input type="text" id="rem-${item.no_wo}" class="filter-input" value="${item.remarks || ''}" placeholder="Catatan pekerjaan...">
+                                </div>
+                            </div>
+
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px;">
+                                <div>
+                                    <button class="btn-danger" onclick="deleteWO('${item.no_wo}')">🗑️ Hapus WO</button>
+                                </div>
+                                <div style="display:flex; gap:10px;">
+                                    <button class="btn-save" onclick="saveWorkOrder('${item.no_wo}')">💾 Simpan Perubahan</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                });
+                html += '</div>';
+            } else {
+                html += `
+                <div class="table-wrap">
+                    <table class="dense-table">
+                        <thead>
+                            <tr>
+                                <th>No WO</th>
+                                <th>Deskripsi Pekerjaan</th>
+                                <th>Area</th>
+                                <th>PIC</th>
+                                <th>Subtask</th>
+                                <th>Progress</th>
+                                <th>Status</th>
+                                <th>Tgl Selesai</th>
+                                <th>Temuan & Foto</th>
+                                <th>Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${pageItems.map(item => {
+                                const st = (item.status || 'SCHED-OK').replace(/\s+/g, '_');
+                                const doneCount = (item.checklist || []).filter(c => c.selesai).length;
+                                const totalCount = item.checklist ? item.checklist.length : 0;
+                                const hasFindings = !!item.temuan || (item.jumlah_foto > 0);
+                                return `
+                                <tr>
+                                    <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.no_wo}</td>
+                                    <td style="font-weight:600;">${item.job_description}</td>
+                                    <td><span style="font-size:0.8rem; color:var(--text-muted);">${item.area || 'GENERAL'}</span></td>
+                                    <td style="font-weight:600;">${item.pic || '-'}</td>
+                                    <td><span style="font-size:0.82rem; font-weight:700;">${doneCount}/${totalCount}</span></td>
+                                    <td>
+                                        <div style="display:flex; align-items:center; gap:6px;">
+                                            <div class="progress-bar-bg" style="width:60px;"><div class="progress-bar-fill" style="width:${item.persen_progress}%;"></div></div>
+                                            <span style="font-size:0.8rem; font-weight:700;">${item.persen_progress}%</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="status-badge badge-${st}">${item.status}</span></td>
+                                    <td style="font-family:'JetBrains Mono'; font-size:0.8rem; color:var(--text-muted);">${item.tanggal_finish || '-'}</td>
+                                    <td>
+                                        <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('wo', '${item.no_wo}', '${item.no_wo} - ${item.job_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
+                                            📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
+                                        </button>
+                                    </td>
+                                    <td>
+                                        <button class="page-btn" style="padding:4px 8px; font-size:0.78rem;" onclick="switchViewMode('cards'); toggleAccordion('body-wo-0');">Detail</button>
+                                    </td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
+            }
+
+            html += renderPaginationControls(filteredItems.length);
+            container.innerHTML = html;
+        }
+
+        

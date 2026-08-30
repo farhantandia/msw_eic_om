@@ -10,6 +10,8 @@ import mimetypes
 import datetime
 import base64
 import openpyxl
+import difflib
+import re
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -321,6 +323,10 @@ def save_add_subtask(data):
                     if total_cnt > 0:
                         pct = round((done_cnt / total_cnt) * 100, 1)
                         r[11].value = pct
+                    inst_desc = str(row[2].value or '').strip()
+                    inst_kks = str(row[3].value or '').strip()
+                    inst_no = str(row[0].value or '').strip()
+                    sync_instrument_to_subtasks(wb, inst_type, inst_kks, inst_no, inst_desc, status_wdone, today_str)
                     break
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
@@ -363,6 +369,206 @@ def save_delete_subtask(data):
         if not ok: return {"status": "error", "message": err}
     return {"status": "success", "message": f"Sub-task '{sub_task}' berhasil dihapus."}
 
+
+def extract_kks(text):
+    if not text:
+        return ""
+    matches = re.findall(r'[0-9]{1,2}[A-Z]{3}[0-9]{2}[A-Z]{2}[0-9]{3}', str(text))
+    if matches:
+        return matches[0]
+    matches2 = re.findall(r'[0-9]{1,2}[A-Z]{3}[0-9]{2}[A-Z]{1,2}[0-9]{1,3}', str(text))
+    if matches2:
+        return matches2[0]
+    return ""
+
+def is_same_component(comp_desc, comp_kks, st_desc):
+    comp_kks = str(comp_kks or '').replace('\xa0', ' ').strip().upper()
+    st_desc_upper = str(st_desc or '').replace('\xa0', ' ').strip().upper()
+    comp_desc_upper = str(comp_desc or '').replace('\xa0', ' ').strip().upper()
+    
+    st_kks = extract_kks(st_desc_upper)
+    
+    # 1. KKS Match
+    if comp_kks and st_kks:
+        if comp_kks == st_kks or comp_kks[2:] == st_kks[2:]:
+            return True
+    if comp_kks and len(comp_kks) >= 6 and comp_kks in st_desc_upper:
+        return True
+        
+    # 2. Text Match
+    if comp_desc_upper and (comp_desc_upper in st_desc_upper or st_desc_upper in comp_desc_upper):
+        return True
+        
+    norm_comp = re.sub(r'^(ACTUATOR|VALVE|MOV|AOV|UNIT \d+|MSW)\s*', '', comp_desc_upper).strip()
+    norm_st = re.sub(r'^(ACTUATOR|VALVE|MOV|AOV|UNIT \d+|MSW|[0-9]{1,2}[A-Z]{3}[0-9]{2}[A-Z]{1,2}[0-9]{1,3}[:\s]*)\s*', '', st_desc_upper).strip()
+    
+    if norm_comp and norm_st and norm_comp == norm_st:
+        return True
+        
+    if len(norm_comp) > 10 and len(norm_st) > 10:
+        ratio = difflib.SequenceMatcher(None, norm_comp, norm_st).ratio()
+        if ratio > 0.85:
+            return True
+            
+    return False
+
+def sync_subtask_to_components(wb, no_wo, subtask_desc, is_done, date_str):
+    today_str = date_str or datetime.date.today().strftime("%d/%m/%Y")
+    
+    # 1. Check ActuatorValve
+    if "ActuatorValve" in wb.sheetnames:
+        ws_act = wb["ActuatorValve"]
+        for row in ws_act.iter_rows(min_row=2):
+            eq_id = str(row[0].value or '').strip()
+            desc = str(row[2].value or '').strip()
+            kks = str(row[3].value or '').strip()
+            if is_same_component(desc, kks or eq_id, subtask_desc):
+                row[9].value = is_done
+                row[10].value = is_done
+                row[7].value = 100 if is_done else 0
+                row[6].value = "FINISH" if is_done else "SCHED-OK"
+                row[8].value = today_str if is_done else None
+
+    # 2. Check Instruments
+    inst_sheets = [
+        "Instrument_PressureTX",
+        "Instrument_TemperatureTX",
+        "Instrument_PressureSwitch"
+    ]
+    for sname in inst_sheets:
+        if sname in wb.sheetnames:
+            ws_inst = wb[sname]
+            for row in ws_inst.iter_rows(min_row=2):
+                desc = str(row[2].value or '').strip()
+                kks = str(row[3].value or '').strip()
+                if is_same_component(desc, kks, subtask_desc):
+                    if sname == "Instrument_PressureSwitch":
+                        row[13].value = is_done
+                        row[14].value = today_str if is_done else None
+                        row[15].value = today_str if is_done else None
+                        if len(row) > 20: row[20].value = is_done
+                    else:
+                        row[7].value = is_done
+                        row[6].value = today_str if is_done else None
+                        if len(row) > 12: row[12].value = is_done
+
+def sync_actuator_to_subtasks(wb, eq_id, kks, desc, is_done, date_str):
+    today_str = date_str or datetime.date.today().strftime("%d/%m/%Y")
+    affected_wos = set()
+    
+    if "WorkOrder_Checklist" in wb.sheetnames:
+        ws_chk = wb["WorkOrder_Checklist"]
+        for row in ws_chk.iter_rows(min_row=2):
+            no_wo = str(row[0].value or '').strip()
+            st_desc = str(row[1].value or '').strip()
+            if is_same_component(desc, kks or eq_id, st_desc):
+                row[4].value = is_done
+                row[2].value = today_str if is_done else None
+                if no_wo:
+                    affected_wos.add(no_wo)
+                    
+    recalculate_wos_progress(wb, affected_wos, today_str)
+
+def sync_instrument_to_subtasks(wb, inst_type, kks, no_val, desc, is_done, date_str):
+    today_str = date_str or datetime.date.today().strftime("%d/%m/%Y")
+    affected_wos = set()
+    
+    if "WorkOrder_Checklist" in wb.sheetnames:
+        ws_chk = wb["WorkOrder_Checklist"]
+        for row in ws_chk.iter_rows(min_row=2):
+            no_wo = str(row[0].value or '').strip()
+            st_desc = str(row[1].value or '').strip()
+            if is_same_component(desc, kks or no_val, st_desc):
+                row[4].value = is_done
+                row[2].value = today_str if is_done else None
+                if no_wo:
+                    affected_wos.add(no_wo)
+                    
+    recalculate_wos_progress(wb, affected_wos, today_str)
+
+def recalculate_wos_progress(wb, affected_wos, date_str):
+    if not affected_wos:
+        return
+    if "WorkOrder_Checklist" not in wb.sheetnames or "WorkOrder" not in wb.sheetnames:
+        return
+    
+    ws_chk = wb["WorkOrder_Checklist"]
+    ws_wo = wb["WorkOrder"]
+    
+    wo_stats = {wn: {'total': 0, 'done': 0} for wn in affected_wos}
+    for row in ws_chk.iter_rows(min_row=2):
+        wn = str(row[0].value or '').strip()
+        if wn in wo_stats:
+            wo_stats[wn]['total'] += 1
+            if row[4].value == True:
+                wo_stats[wn]['done'] += 1
+                
+    for row in ws_wo.iter_rows(min_row=2):
+        wn = str(row[1].value or '').strip()
+        if wn in wo_stats:
+            total_st = wo_stats[wn]['total']
+            done_st = wo_stats[wn]['done']
+            row[10].value = total_st
+            pct = round((done_st / total_st) * 100, 1) if total_st > 0 else 0.0
+            row[11].value = pct
+            if done_st == total_st and total_st > 0:
+                row[8].value = "FINISH"
+                if not row[7].value:
+                    row[7].value = date_str
+            elif done_st > 0:
+                row[8].value = "IN PROGRESS"
+                if row[8].value == "FINISH":
+                    row[7].value = None
+            else:
+                row[8].value = "SCHED-OK"
+                row[7].value = None
+
+def load_master_components(unit):
+    path = get_excel_path(unit)
+    if not os.path.exists(path):
+        return {"actuators": [], "instruments": []}
+    
+    with FILE_LOCK:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        actuators = []
+        if "ActuatorValve" in wb.sheetnames:
+            ws = wb["ActuatorValve"]
+            for r in list(ws.iter_rows(values_only=True))[1:]:
+                if r[0] or r[2]:
+                    actuators.append({
+                        "equipment_id": clean_val(r[0]),
+                        "area": clean_val(r[1]) or "BOILER",
+                        "equipment_description": clean_val(r[2]),
+                        "kks": clean_val(r[3]),
+                        "pic": normalize_pic(clean_val(r[5])),
+                        "status": clean_val(r[6]) or "SCHED-OK",
+                        "persen_progress": clean_val(r[7]) or 0
+                    })
+                    
+        instruments = []
+        inst_sheets = [
+            ("Instrument_PressureTX", "pressure_tx", "Pressure Transmitter (PT)"),
+            ("Instrument_TemperatureTX", "temperature_tx", "Temperature Transmitter (TT)"),
+            ("Instrument_PressureSwitch", "pressure_switch", "Pressure Switch (PS)")
+        ]
+        for sname, itype, ilabel in inst_sheets:
+            if sname in wb.sheetnames:
+                ws = wb[sname]
+                for r in list(ws.iter_rows(values_only=True))[1:]:
+                    if r[2]:
+                        instruments.append({
+                            "no": clean_val(r[0]),
+                            "area": clean_val(r[1]) or "GENERAL",
+                            "equipment": clean_val(r[2]),
+                            "kks": clean_val(r[3]),
+                            "type": itype,
+                            "type_label": ilabel,
+                            "range": clean_val(r[5]) if len(r)>5 else "",
+                            "status_wdone": bool(r[13] if sname=="Instrument_PressureSwitch" else r[7])
+                        })
+                        
+    return {"actuators": actuators, "instruments": instruments}
+
 def save_quick_subtask_toggle(data):
     unit = data.get("unit", 1)
     no_wo = str(data.get("no_wo", "")).strip()
@@ -381,11 +587,14 @@ def save_quick_subtask_toggle(data):
                 if r[0].value and str(r[0].value).strip() == no_wo:
                     if (sub_task and str(r[1].value).strip() == sub_task) or (sub_idx is not None and match_idx == int(sub_idx)):
                         r[4].value = selesai
+                        actual_sub_desc = str(r[1].value).strip()
                         if selesai:
                             if not r[2].value:
                                 r[2].value = today_str
                         else:
                             r[2].value = None
+                        # Auto-sync to Actuators and Instruments
+                        sync_subtask_to_components(wb, no_wo, actual_sub_desc, selesai, today_str)
                         break
                     match_idx += 1
 
@@ -453,6 +662,9 @@ def save_batch_subtask_toggle(data):
                     total_cnt += 1
                     r[4].value = is_done
                     r[2].value = today_str
+                    actual_sub_desc = str(r[1].value or '').strip()
+                    if actual_sub_desc:
+                        sync_subtask_to_components(wb, no_wo, actual_sub_desc, is_done, today_str)
 
         new_pct = 100.0 if (is_done and total_cnt > 0) else 0.0
         new_status = "FINISH" if (is_done and total_cnt > 0) else "SCHED-OK"
@@ -514,6 +726,10 @@ def save_quick_actuator_toggle(data):
                     
                     new_pct = r[7].value
                     new_status = r[6].value
+                    act_desc = str(r[2].value or '').strip()
+                    act_kks = str(r[3].value or '').strip()
+                    is_finish = (new_status == "FINISH" or new_pct == 100)
+                    sync_actuator_to_subtasks(wb, eq_id, act_kks, act_desc, is_finish, today_str)
                     break
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
@@ -1337,6 +1553,9 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(HTML_TEMPLATE.encode('utf-8'))
             return
@@ -1346,6 +1565,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             data = load_unit_data(unit)
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
             return
@@ -1354,8 +1574,19 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             matrix = load_actuator_matrix()
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(json.dumps(matrix, ensure_ascii=False).encode('utf-8'))
+            return
+
+        elif path == "/api/master_components":
+            unit = int(query.get("unit", [1])[0])
+            data = load_master_components(unit)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
             return
 
         elif path == "/api/findings":
@@ -1749,16 +1980,89 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         .section-h4 { font-size: 0.88rem; font-weight: 700; color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
         
-        /* Checklist Grid */
-        .checklist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; margin-bottom: 18px; }
-        .checklist-item {
-            background: var(--bg-sub); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);
-            display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; transition: border-color 0.2s, background 0.2s;
+        /* Checklist Grid & Subtask Cards */
+        .checklist-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
         }
-        .checklist-item:hover { border-color: rgba(56, 189, 248, 0.4); }
-        .checklist-item.done { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.3); }
-        .checklist-item label { display: flex; align-items: center; gap: 10px; cursor: pointer; flex-grow: 1; user-select: none; }
-        .checklist-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+        .checklist-item {
+            background: var(--bg-sub);
+            padding: 12px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.86rem;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            min-height: 85px;
+        }
+        .checklist-item:hover {
+            border-color: rgba(56, 189, 248, 0.45);
+            background: var(--bg-card-hover);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        .checklist-item.done {
+            background: rgba(16, 185, 129, 0.06);
+            border-color: rgba(16, 185, 129, 0.35);
+        }
+        .checklist-item-body {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            cursor: pointer;
+            width: 100%;
+            margin: 0;
+            user-select: none;
+        }
+        .checklist-item-body input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-top: 2px;
+            flex-shrink: 0;
+            accent-color: var(--status-finish);
+            cursor: pointer;
+        }
+        .checklist-item-body span {
+            word-break: break-word;
+            font-size: 0.86rem;
+            font-weight: 600;
+            color: var(--text-main);
+            line-height: 1.45;
+            flex-grow: 1;
+            transition: color 0.2s, text-decoration 0.2s;
+        }
+        .checklist-item.done .checklist-item-body span {
+            text-decoration: line-through;
+            color: var(--text-muted);
+            opacity: 0.65;
+        }
+        .checklist-item-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            margin-top: auto;
+            min-height: 24px;
+        }
+        .checklist-footer-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .checklist-footer-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
 
         /* Dense Table View */
         .table-wrap { overflow-x: auto; background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border-color); }
@@ -2022,6 +2326,106 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             .outage-progress-box { width: 100%; }
             .sticky-summary-bar { flex-direction: column; align-items: flex-start; padding: 10px 16px; }
         }
+    
+        /* Component Badges on Subtask Checklist */
+        .badge-tag-comp {
+            display: inline-flex;
+            align-items: center;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            letter-spacing: 0.04em;
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .badge-tag-act {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+        .badge-tag-inst {
+            background: rgba(6, 182, 212, 0.15);
+            color: #38bdf8;
+            border: 1px solid rgba(6, 182, 212, 0.35);
+        }
+        .badge-tag-elec {
+            background: rgba(139, 92, 246, 0.15);
+            color: #a78bfa;
+            border: 1px solid rgba(139, 92, 246, 0.35);
+        }
+
+        /* Mode Selector Buttons for Add Subtask */
+        .comp-mode-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .comp-mode-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: rgba(99, 102, 241, 0.08);
+        }
+        .comp-mode-btn.active {
+            background: var(--primary);
+            color: #090d16;
+            border-color: var(--primary);
+            font-weight: 700;
+            box-shadow: 0 0 8px rgba(99, 102, 241, 0.35);
+        }
+
+        /* Clean Checklist Item Layout */
+        .checklist-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            min-height: 20px;
+            margin-bottom: 2px;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
+        .btn-del-subtask-cross {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.2rem;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0 4px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.5;
+        }
+        .checklist-item:hover .btn-del-subtask-cross {
+            opacity: 0.9;
+        }
+        .btn-del-subtask-cross:hover {
+            color: #f43f5e !important;
+            background: rgba(244, 63, 94, 0.15);
+        }
+
     </style>
 </head>
 <body>
@@ -2293,13 +2697,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         </div>
                     </div>
 
-                    <!-- Quick Filter Chips -->
-                    <div class="filter-pills">
-                        <span style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-right:4px;">Filter Cepat:</span>
-                        <button class="pill-btn active" id="pill-all" onclick="setQuickFilter('all')">Semua Item</button>
-                        <button class="pill-btn" id="pill-findings" onclick="setQuickFilter('findings')">🚨 Ada Temuan / Foto</button>
-                        <button class="pill-btn" id="pill-inprog" onclick="setQuickFilter('inprog')">⏳ In Progress / Belum Selesai</button>
-                        <button class="pill-btn" id="pill-finish" onclick="setQuickFilter('finish')">☑️ Selesai (100%)</button>
+                    <!-- Quick Filter Chips & Side Item Counter -->
+                    <div class="filter-pills" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            <span style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-right:4px;">Filter Cepat:</span>
+                            <button class="pill-btn active" id="pill-all" onclick="setQuickFilter('all')">Semua Item</button>
+                            <button class="pill-btn" id="pill-findings" onclick="setQuickFilter('findings')">🚨 Ada Temuan / Foto</button>
+                            <button class="pill-btn" id="pill-inprog" onclick="setQuickFilter('inprog')">⏳ In Progress</button>
+                            <button class="pill-btn" id="pill-finish" onclick="setQuickFilter('finish')">☑️ Selesai</button>
+                        </div>
+                        <div id="side-pagination-counter" style="margin-left:auto; display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:600; color:var(--text-muted); background:var(--bg-sub); padding:4px 12px; border-radius:20px; border:1px solid var(--border-color);">
+                            <span>Menampilkan <strong style="color:var(--primary);" id="side-item-range">0 - 0</strong> dari <strong style="color:var(--text-main);" id="side-item-total">0</strong> item</span>
+                            <select id="side-page-size-select" class="filter-input" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; margin-left:4px;" onchange="changePageSize(this.value)">
+                                <option value="10">10 / hal</option>
+                                <option value="25">25 / hal</option>
+                                <option value="50">50 / hal</option>
+                                <option value="1000">Semua</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -2377,9 +2792,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         async function loadData() {
             try {
-                const res = await fetch(`/api/data?unit=${currentUnit}`);
+                const [res, compRes] = await Promise.all([
+                    fetch(`/api/data?unit=${currentUnit}`),
+                    fetch(`/api/master_components?unit=${currentUnit}`).catch(() => null)
+                ]);
                 if(!res.ok) throw new Error(`HTTP ${res.status} Server Error`);
                 fullData = await res.json();
+                if(compRes && compRes.ok) {
+                    const compData = await compRes.json();
+                    fullData.master_actuators = compData.actuators || [];
+                    fullData.master_instruments = compData.instruments || [];
+                }
                 const titleEl = document.getElementById('outage-unit-title');
                 if(titleEl) titleEl.innerText = `Monitoring Progress Outage EIC Unit ${currentUnit}`;
                 
@@ -2505,12 +2928,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             renderTabContent();
         }
 
+        function updateSidePaginationCounter(totalItems) {
+            const rangeEl = document.getElementById('side-item-range');
+            const totalEl = document.getElementById('side-item-total');
+            const selEl = document.getElementById('side-page-size-select');
+            
+            if(rangeEl && totalEl) {
+                const from = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+                const to = Math.min(currentPage * pageSize, totalItems);
+                rangeEl.innerText = `${from} - ${to}`;
+                totalEl.innerText = `${totalItems}`;
+            }
+            if(selEl) {
+                selEl.value = String(pageSize);
+            }
+        }
+
         function renderPaginationControls(totalItems) {
+            updateSidePaginationCounter(totalItems);
             const totalPages = Math.ceil(totalItems / pageSize) || 1;
             if(currentPage > totalPages) currentPage = totalPages;
 
+            if(totalPages <= 1) {
+                return '';
+            }
+
             return `
-            <div class="pagination-bar">
+            <div class="pagination-bar" style="margin-top:20px;">
                 <div>Menampilkan <strong>${totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, totalItems)}</strong> dari <strong>${totalItems}</strong> item</div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <button class="page-btn" onclick="changePage(1)" ${currentPage===1?'disabled':''}>⏮️ Awal</button>
@@ -2518,12 +2962,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <span style="font-weight:700; margin:0 6px;">Halaman ${currentPage} / ${totalPages}</span>
                     <button class="page-btn" onclick="changePage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>Next ▶️</button>
                     <button class="page-btn" onclick="changePage(${totalPages})" ${currentPage===totalPages?'disabled':''}>Akhir ⏭️</button>
-                    <select class="filter-input" style="padding:4px 8px; margin-left:10px;" onchange="changePageSize(this.value)">
-                        <option value="10" ${pageSize===10?'selected':''}>10 / hal</option>
-                        <option value="25" ${pageSize===25?'selected':''}>25 / hal</option>
-                        <option value="50" ${pageSize===50?'selected':''}>50 / hal</option>
-                        <option value="1000" ${pageSize===1000?'selected':''}>Semua</option>
-                    </select>
                 </div>
             </div>`;
         }
@@ -2574,7 +3012,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             );
 
             const isAddWoOpen = openCardIds.has('add-wo-form');
-            let html = `
+            let html = '';
+
+            html += `
             <div style="margin-bottom:20px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-wo-form')">
                     <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700;">➕ Tambah Work Order (WO) Baru</h3>
@@ -2617,7 +3057,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>`;
 
-            html += renderPaginationControls(filteredItems.length);
+            updateSidePaginationCounter(filteredItems.length);
 
             if(filteredItems.length === 0) {
                 html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">Tidak ada Work Order yang sesuai dengan filter pencarian.</div>';
@@ -2629,6 +3069,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
 
             if(currentViewMode === 'cards') {
+                if(openCardIds.size === 0 && pageItems.length > 0) {
+                    const firstBodyId = getCardBodyId('wo', pageItems[0].no_wo || 0);
+                    openCardIds.add(firstBodyId);
+                }
                 html += '<div class="card-list">';
                 pageItems.forEach((item, idx) => {
                     const st = String(item.status || 'SCHED-OK').replace(/\s+/g, '_');
@@ -2670,23 +3114,76 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                                     ` : ''}
                                 </div>
                                 <div class="checklist-grid">
-                                    ${(item.checklist || []).map((c, cIdx) => `
+                                    ${(item.checklist || []).map((c, cIdx) => {
+                                        const typeBadge = getSubtaskTypeBadge(c.sub_task);
+                                        return `
                                         <div class="checklist-item ${c.selesai ? 'done' : ''}">
-                                            <label style="cursor:pointer; display:flex; align-items:center; gap:8px;">
+                                            <label class="checklist-item-body">
                                                 <input type="checkbox" id="chk-${item.no_wo}-${cIdx}" ${c.selesai ? 'checked' : ''} onchange="toggleLocalSubtask('${item.no_wo}', ${cIdx}, this.checked)">
-                                                <span style="${c.selesai?'text-decoration:line-through; color:var(--text-muted);':''}">${c.sub_task}</span>
+                                                <span>${c.sub_task}</span>
                                             </label>
-                                            <div style="display:flex; align-items:center; gap:8px;">
-                                                ${c.tanggal ? `<span class="date-badge" style="font-size:0.75rem; color:var(--primary); font-family:'JetBrains Mono',monospace; background:var(--date-badge-bg); padding:2px 7px; border-radius:4px; border:1px solid var(--border-color);" title="Tanggal Dikerjakan">📅 ${c.tanggal}</span>` : ''}
-                                                <button style="background:none; border:none; color:#f43f5e; cursor:pointer; font-size:0.85rem;" title="Hapus Subtask" onclick="deleteSubtask('${item.no_wo}', '${(c.sub_task||'').toString().replace(/'/g, "\\'")}')">🗑️</button>
+                                            <div class="checklist-item-footer">
+                                                <div class="checklist-footer-left">
+                                                    ${typeBadge}
+                                                </div>
+                                                <div class="checklist-footer-right">
+                                                    ${c.tanggal ? `<span class="date-badge" style="font-size:0.72rem; color:var(--status-finish); font-family:'JetBrains Mono',monospace; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:2px 7px; border-radius:4px;" title="Tanggal Dikerjakan">📅 ${c.tanggal}</span>` : ''}
+                                                    <button class="btn-del-subtask-cross" title="Hapus Subtask" onclick="deleteSubtask('${item.no_wo}', '${(c.sub_task||'').toString().replace(/'/g, "\\'")}')" aria-label="Hapus">&times;</button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    `).join('')}
+                                        </div>`;
+                                    }).join('')}
                                 </div>
                                 
-                                <div style="display:flex; gap:8px; margin-top:12px; max-width:550px;">
-                                    <input type="text" id="new-subtask-${item.no_wo}" class="filter-input" placeholder="Tambah checklist sub-task baru..." style="flex-grow:1; font-size:0.82rem;">
-                                    <button class="btn-save" style="padding:6px 14px; font-size:0.8rem;" onclick="addSubtask('${item.no_wo}')">➕ Tambah Sub-task</button>
+                                <div style="margin-top:14px; background:rgba(0,0,0,0.2); border:1px solid var(--border-color); border-radius:8px; padding:10px 12px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                                        <span style="font-size:0.78rem; font-weight:700; color:var(--text-muted);">➕ Tambah Sub-task ke WO:</span>
+                                        <div style="display:flex; gap:5px;">
+                                            <button type="button" class="comp-mode-btn btn-mode-manual ${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'manual')">✏️ Manual</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-act ${subtaskAddModes[item.no_wo]==='actuator'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'actuator')">⚙️ Pilih Actuator (${(fullData.master_actuators||fullData.actuators||[]).length})</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-inst ${subtaskAddModes[item.no_wo]==='instrument'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'instrument')">📟 Pilih Instrument (${((fullData.pressure_tx||[]).length + (fullData.temperature_tx||[]).length + (fullData.pressure_switch||[]).length)})</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Mode 1: Manual Input -->
+                                    <div id="box-subtask-manual-${item.no_wo}" style="display:${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'flex':'none'}; gap:8px;">
+                                        <input type="text" id="new-subtask-${item.no_wo}" class="filter-input" placeholder="Ketik deskripsi sub-task (mis. INSPECTION FRAME MOTOR)..." style="flex-grow:1; font-size:0.82rem;">
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap;" onclick="addSubtask('${item.no_wo}', 'manual')">➕ Tambah</button>
+                                    </div>
+
+                                    <!-- Mode 2: Actuator Dropdown Picker -->
+                                    <div id="box-subtask-act-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='actuator'?'flex':'none'}; gap:8px;">
+                                        <select id="new-subtask-act-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
+                                            <option value="">-- Pilih Actuator Valve dari Master List --</option>
+                                            ${(fullData.master_actuators || fullData.actuators || []).map(a => `
+                                                <option value="${a.equipment_description} ${a.kks||''}">[${a.area}] ${a.equipment_description} ${a.kks ? '('+a.kks+')' : ''}</option>
+                                            `).join('')}
+                                        </select>
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#f59e0b; border-color:#d97706; color:#000;" onclick="addSubtask('${item.no_wo}', 'actuator')">⚙️ Tambah Actuator</button>
+                                    </div>
+
+                                    <!-- Mode 3: Instrument Dropdown Picker -->
+                                    <div id="box-subtask-inst-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='instrument'?'flex':'none'}; gap:8px;">
+                                        <select id="new-subtask-inst-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
+                                            <option value="">-- Pilih Instrument dari Master List (PT/TT/PS) --</option>
+                                            <optgroup label="Pressure Transmitter (PTX)">
+                                                ${(fullData.pressure_tx || []).map(p => `
+                                                    <option value="${p.kks ? p.kks+': ' : ''}${p.equipment}">[PTX - ${p.area}] ${p.kks ? p.kks+' : ' : ''}${p.equipment}</option>
+                                                `).join('')}
+                                            </optgroup>
+                                            <optgroup label="Temperature Transmitter (TTX)">
+                                                ${(fullData.temperature_tx || []).map(t => `
+                                                    <option value="${t.kks ? t.kks+': ' : ''}${t.equipment}">[TTX - ${t.area}] ${t.kks ? t.kks+' : ' : ''}${t.equipment}</option>
+                                                `).join('')}
+                                            </optgroup>
+                                            <optgroup label="Pressure Switch (PSW)">
+                                                ${(fullData.pressure_switch || []).map(s => `
+                                                    <option value="${s.kks ? s.kks+': ' : ''}${s.equipment}">[PSW - ${s.area}] ${s.kks ? s.kks+' : ' : ''}${s.equipment}</option>
+                                                `).join('')}
+                                            </optgroup>
+                                        </select>
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#06b6d4; border-color:#0891b2; color:#000;" onclick="addSubtask('${item.no_wo}', 'instrument')">📟 Tambah Instrument</button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -2831,7 +3328,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>`;
 
-            html += renderPaginationControls(filteredItems.length);
+            updateSidePaginationCounter(filteredItems.length);
 
             if(filteredItems.length === 0) {
                 html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">Tidak ada Actuator Valve yang sesuai filter.</div>';
@@ -2843,6 +3340,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
 
             if(currentViewMode === 'cards') {
+                if(openCardIds.size === 0 && pageItems.length > 0) {
+                    const firstBodyId = getCardBodyId('wo', pageItems[0].no_wo || 0);
+                    openCardIds.add(firstBodyId);
+                }
                 html += '<div class="card-list">';
                 pageItems.forEach((item, idx) => {
                     const st = String(item.status || 'SCHED-OK').replace(/\s+/g, '_');
@@ -3052,7 +3553,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <button class="tab-btn ${instSubtab==='psw'?'active':''}" onclick="switchInstSubtab('psw')">Pressure Switch (${(fullData.pressure_switch||[]).length})</button>
             </div>`;
 
-            html += renderPaginationControls(filteredItems.length);
+            updateSidePaginationCounter(filteredItems.length);
 
             if(filteredItems.length === 0) {
                 html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">Tidak ada instrumen yang sesuai filter.</div>';
@@ -3064,6 +3565,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const pageItems = filteredItems.slice(startIndex, startIndex + pageSize);
 
             if(currentViewMode === 'cards') {
+                if(openCardIds.size === 0 && pageItems.length > 0) {
+                    const firstBodyId = getCardBodyId('wo', pageItems[0].no_wo || 0);
+                    openCardIds.add(firstBodyId);
+                }
                 html += '<div class="card-list">';
                 pageItems.forEach((item, idx) => {
                     const title = (instSubtab==='psw' ? item.description : item.equipment) || `Item #${item.no}`;
@@ -3348,18 +3853,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const el = document.getElementById(id);
             if(!el) return;
             const wasOpen = openCardIds.has(id) || el.classList.contains('open') || (el.style.display === 'block');
+            const arrow = document.getElementById(`arrow-${id}`);
             if (wasOpen) {
                 openCardIds.delete(id);
                 el.classList.remove('open');
                 el.style.display = 'none';
-                const arrow = document.getElementById(`arrow-${id}`);
-                if(arrow) arrow.innerText = id === 'add-scope-form' ? '➕ Tambah Scope' : '▼ Buka Form';
+                if(arrow) {
+                    if(id === 'add-scope-form') arrow.innerText = '➕ Tambah Scope';
+                    else arrow.innerText = '▼ Buka Form';
+                }
             } else {
                 openCardIds.add(id);
                 el.classList.add('open');
                 el.style.display = 'block';
-                const arrow = document.getElementById(`arrow-${id}`);
-                if(arrow) arrow.innerText = id === 'add-scope-form' ? '▲ Tutup Scope' : '▲ Tutup Form';
+                if(arrow) {
+                    if(id === 'add-scope-form') arrow.innerText = '▲ Tutup Scope';
+                    else arrow.innerText = '▲ Tutup Form';
+                }
             }
         }
 
@@ -4213,6 +4723,79 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             container.innerHTML = html;
         }
 
+        
+        function getSubtaskTypeBadge(desc) {
+            if(!desc) return '';
+            const s = String(desc).replace(/\xa0/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+            
+            // 1. Actuator Detection
+            if(s.includes('ACTUATOR') || s.includes(' MOV') || s.includes('MOV ') || s.includes(' AOV') || s.includes('AOV ') || s.includes('GATE ACTUATOR') || s.includes('DAMPER ACTUATOR') || s.includes('VALVE ACTUATOR') || s.includes('FEED WATER CONTROL VALVE')) {
+                return '<span class="badge-tag-comp badge-tag-act">ACTUATOR</span>';
+            }
+            const acts = (fullData.master_actuators || fullData.actuators || []);
+            for(let i = 0; i < acts.length; i++) {
+                const a = acts[i];
+                const aKks = (a.kks || '').replace(/\xa0/g, ' ').trim().toUpperCase();
+                if(aKks.length >= 6) {
+                    const kksCore = aKks.length >= 8 ? aKks.slice(2) : aKks;
+                    if(s.includes(aKks) || s.includes(kksCore)) {
+                        return '<span class="badge-tag-comp badge-tag-act">ACTUATOR</span>';
+                    }
+                }
+                const aDesc = (a.equipment_description || '').replace(/\xa0/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+                if(aDesc.length >= 8 && (s.includes(aDesc) || aDesc.includes(s))) {
+                    return '<span class="badge-tag-comp badge-tag-act">ACTUATOR</span>';
+                }
+            }
+            
+            // 2. Instrument Detection (PTX, TTX, PSW)
+            if(s.includes('TRANSMITTER') || s.includes('PRESSURE TRANSMITTER') || s.includes('TEMP TRANSMITTER') || s.includes('TEMPERATURE TRANSMITTER') || s.includes('PRESSURE SWITCH') || s.includes('TEMP SWITCH') || s.includes('TEMPERATURE SWITCH') || s.includes('KALIBRASI TRANSMITTER') || s.includes('CALIBRATION MEASUREMENT') || s.includes('MEASUREMENT DEVICE')) {
+                return '<span class="badge-tag-comp badge-tag-inst">INSTRUMENT</span>';
+            }
+            const insts = [...(fullData.pressure_tx || []), ...(fullData.temperature_tx || []), ...(fullData.pressure_switch || []), ...(fullData.master_instruments || [])];
+            for(let i = 0; i < insts.length; i++) {
+                const inst = insts[i];
+                const iKks = (inst.kks || '').replace(/\xa0/g, ' ').trim().toUpperCase();
+                if(iKks.length >= 6) {
+                    const kksCore = iKks.length >= 8 ? iKks.slice(2) : iKks;
+                    if(s.includes(iKks) || s.includes(kksCore)) {
+                        return '<span class="badge-tag-comp badge-tag-inst">INSTRUMENT</span>';
+                    }
+                }
+                const iDesc = (inst.equipment || inst.description || '').replace(/\xa0/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+                if(iDesc.length >= 8 && (s.includes(iDesc) || iDesc.includes(s))) {
+                    return '<span class="badge-tag-comp badge-tag-inst">INSTRUMENT</span>';
+                }
+            }
+            
+            // Jika bukan Actuator dan bukan Instrument -> TANPA LABEL
+            return '';
+        }
+
+        const subtaskAddModes = {};
+
+        function setSubtaskMode(noWo, mode) {
+            subtaskAddModes[noWo] = mode;
+            const cardEl = document.getElementById(`card-wo-${noWo}`);
+            if(!cardEl) return;
+            
+            const btnManual = cardEl.querySelector(`.btn-mode-manual`);
+            const btnAct = cardEl.querySelector(`.btn-mode-act`);
+            const btnInst = cardEl.querySelector(`.btn-mode-inst`);
+            
+            if(btnManual) btnManual.classList.toggle('active', mode === 'manual');
+            if(btnAct) btnAct.classList.toggle('active', mode === 'actuator');
+            if(btnInst) btnInst.classList.toggle('active', mode === 'instrument');
+            
+            const boxManual = document.getElementById(`box-subtask-manual-${noWo}`);
+            const boxAct = document.getElementById(`box-subtask-act-${noWo}`);
+            const boxInst = document.getElementById(`box-subtask-inst-${noWo}`);
+            
+            if(boxManual) boxManual.style.display = mode === 'manual' ? 'flex' : 'none';
+            if(boxAct) boxAct.style.display = mode === 'actuator' ? 'flex' : 'none';
+            if(boxInst) boxInst.style.display = mode === 'instrument' ? 'flex' : 'none';
+        }
+
         /* ---------------- QUICK ACTIONS (NO AUTO REFRESH) ---------------- */
         function toggleLocalSubtask(noWo, cIdx, isChecked) {
             const item = (fullData.work_orders || []).find(w => w.no_wo === noWo);
@@ -4225,21 +4808,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const chkItemEl = document.getElementById(`chk-${noWo}-${cIdx}`)?.closest('.checklist-item');
             if(chkItemEl) {
                 chkItemEl.classList.toggle('done', isChecked);
-                const spanEl = chkItemEl.querySelector('label span');
+                const spanEl = chkItemEl.querySelector('.checklist-item-body span');
                 if(spanEl) {
                     spanEl.style.textDecoration = isChecked ? 'line-through' : 'none';
                     spanEl.style.color = isChecked ? 'var(--text-muted)' : 'var(--text-main)';
+                    spanEl.style.opacity = isChecked ? '0.65' : '1';
                 }
-                const actionDiv = chkItemEl.querySelector('div:last-child');
-                let dateBadge = actionDiv?.querySelector('.date-badge');
+                const rightBox = chkItemEl.querySelector('.header-right');
+                let dateBadge = rightBox?.querySelector('.date-badge');
                 if(isChecked) {
-                    if(!dateBadge && actionDiv) {
+                    if(!dateBadge && rightBox) {
                         const badge = document.createElement('span');
                         badge.className = 'date-badge';
-                        badge.style.cssText = "font-size:0.75rem; color:var(--primary); font-family:'JetBrains Mono',monospace; background:var(--date-badge-bg); padding:2px 7px; border-radius:4px; border:1px solid var(--border-color);";
                         badge.title = "Tanggal Dikerjakan";
-                        badge.innerText = `📅 ${nowStr}`;
-                        actionDiv.insertBefore(badge, actionDiv.firstChild);
+                        badge.innerText = `${nowStr}`;
+                        const delBtn = rightBox.querySelector('.btn-del-subtask-cross');
+                        rightBox.insertBefore(badge, delBtn);
                     }
                 } else {
                     if(dateBadge) dateBadge.remove();
@@ -4564,26 +5148,52 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
-        async function addSubtask(noWo) {
-            const input = document.getElementById(`new-subtask-${noWo}`);
-            const subTask = (input.value || '').trim();
-            if(!subTask) {
-                showToast('Silakan masukkan deskripsi sub-task!', 'error');
-                return;
+        async function addSubtask(noWo, mode = 'manual') {
+            let subTask = '';
+            let defaultPic = '';
+            
+            if(mode === 'actuator') {
+                const sel = document.getElementById(`new-subtask-act-${noWo}`);
+                subTask = (sel?.value || '').trim();
+                defaultPic = 'AMP';
+                if(!subTask) {
+                    showToast('Silakan pilih Actuator dari dropdown!', 'error');
+                    return;
+                }
+            } else if(mode === 'instrument') {
+                const sel = document.getElementById(`new-subtask-inst-${noWo}`);
+                subTask = (sel?.value || '').trim();
+                defaultPic = 'JAPA';
+                if(!subTask) {
+                    showToast('Silakan pilih Instrument dari dropdown!', 'error');
+                    return;
+                }
+            } else {
+                const input = document.getElementById(`new-subtask-${noWo}`);
+                subTask = (input?.value || '').trim();
+                if(!subTask) {
+                    showToast('Silakan masukkan deskripsi sub-task!', 'error');
+                    return;
+                }
             }
 
             try {
                 const res = await fetch('/api/add_subtask', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({unit: currentUnit, no_wo: noWo, sub_task: subTask})
+                    body: JSON.stringify({unit: currentUnit, no_wo: noWo, sub_task: subTask, pic: defaultPic})
                 });
                 const result = await res.json();
-                showToast(result.message || 'Sub-task berhasil ditambahkan!', 'success');
-                input.value = '';
-                loadData();
+                if(result.status === 'success') {
+                    showToast(result.message || 'Sub-task berhasil ditambahkan dan disinkronkan!', 'success');
+                    const input = document.getElementById(`new-subtask-${noWo}`);
+                    if(input) input.value = '';
+                    loadData();
+                } else {
+                    showToast(result.message || 'Gagal menambah sub-task', 'error');
+                }
             } catch(e) {
-                showToast('Gagal menambah sub-task', 'error');
+                showToast('Gagal menambah sub-task: ' + e.message, 'error');
             }
         }
 
@@ -5210,13 +5820,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
-class ReuseTCPServer(socketserver.TCPServer):
-    allow_reuse_address = True
+class ReuseTCPServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = False
 
 def get_local_ip():
     try:
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(1.0)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
@@ -5232,7 +5843,7 @@ def run_server():
         httpd = ReuseTCPServer(server_address, EICMonitoringHandler)
     except OSError as e:
         print(f"==================================================================")
-        print(f" [INFO] Server Outage EIC Monitoring sudah aktif!")
+        print(f" [INFO] Server Outage EIC Monitoring sudah aktif di port {PORT}!")
         print(f" Akses dari PC ini  : http://localhost:{PORT}")
         print(f" Akses dari PC lain : http://{local_ip}:{PORT}")
         print(f"==================================================================")
