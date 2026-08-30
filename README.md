@@ -17,89 +17,89 @@
 
 ---
 
-## 📌 Daftar Isi (Table of Contents)
-- [1. Pengantar & Latar Belakang](#-1-pengantar--latar-belakang-introduction)
-- [2. Tujuan Sistem](#-2-tujuan-sistem-objectives)
-- [3. Fitur Utama & Dokumentasi Visual](#-3-fitur-utama--dokumentasi-visual-key-features)
-  - [3.1. Dashboard Real-Time & KPI Progress](#31-dashboard-real-time--kpi-progress)
-  - [3.2. Manajemen Work Order & Batch Action](#32-manajemen-work-order--batch-action)
-  - [3.3. Monitoring Actuator Valves](#33-monitoring-actuator-valves)
-  - [3.4. Verifikasi & Kalibrasi Instrumen](#34-verifikasi--kalibrasi-instrumen)
-  - [3.5. Pusat Laporan Resmi & Ekspor](#35-pusat-laporan-resmi--ekspor)
-  - [3.6. Analisis Kurva-S & Tren Harian](#36-analisis-kurva-s--tren-harian)
-  - [3.7. Generator Ringkasan WhatsApp](#37-generator-ringkasan-whatsapp)
+## 📌 Table of Contents
+- [1. Introduction & Background](#-1-introduction--background)
+- [2. System Objectives](#-2-system-objectives)
+- [3. Key Features & Visual Documentation](#-3-key-features--visual-documentation)
+  - [3.1. Real-Time Dashboard & KPI Progress](#31-real-time-dashboard--kpi-progress)
+  - [3.2. Work Order Management & Batch Actions](#32-work-order-management--batch-actions)
+  - [3.3. Actuator Valve Monitoring](#33-actuator-valve-monitoring)
+  - [3.4. Instrument Verification & Calibration](#34-instrument-verification--calibration)
+  - [3.5. Official Report Center & Export](#35-official-report-center--export)
+  - [3.6. S-Curve Analysis & Daily Trends](#36-s-curve-analysis--daily-trends)
+  - [3.7. WhatsApp Summary Generator](#37-whatsapp-summary-generator)
   - [3.8. Dual Theme (Dark & Light Mode)](#38-dual-theme-dark--light-mode)
-- [4. Struktur Direktori & Arsitektur](#-4-struktur-direktori--arsitektur-directory-structure)
-- [5. Cara Menjalankan Aplikasi](#-5-cara-menjalankan-aplikasi-getting-started)
-- [6. Protokol Sinkronisasi Data Excel](#-6-protokol-sinkronisasi-data-excel-sync-protocol)
-- [7. Pemecahan Masalah & FAQ](#-7-pemecahan-masalah--faq-troubleshooting)
+- [4. Directory Structure & Architecture](#-4-directory-structure--architecture)
+- [5. Getting Started (Running the Application)](#-5-getting-started-running-the-application)
+- [6. Excel Data Synchronization Protocol](#-6-excel-data-synchronization-protocol)
+- [7. Troubleshooting & FAQ](#-7-troubleshooting--faq)
 
 ---
 
-## 📖 1. Pengantar & Latar Belakang (Introduction)
+## 📖 1. Introduction & Background
 
-**PLTU MSW EIC Outage Monitoring System** adalah platform pemantauan pekerjaan pemeliharaan berkala (*Overhaul / Outage*) berbasis web lokal yang dikembangkan khusus untuk **Section Electric, Instrument & Control (EIC) PLTU MSW (2 x 30MW)**.
+**PLTU MSW EIC Outage Monitoring System** is a local web-based periodic maintenance (*Overhaul / Outage*) monitoring platform specifically engineered for the **Electric, Instrument & Control (EIC) Section at PLTU MSW (2 x 30MW)**.
 
-Sistem ini memfasilitasi tim pemeliharaan dalam memantau, memperbarui, dan mendokumentasikan progres ratusan item pekerjaan lapangan (Work Order, Motorized Valve Actuator, serta Sensor Transmitter & Switch) secara real-time yang tersinkronisasi langsung secara dua arah (*two-way synchronization*) dengan master database spreadsheet Microsoft Excel (`Template_Outage_EIC_Monitoring_unit 1.xlsx` dan `unit 2.xlsx`).
-
----
-
-## 🎯 2. Tujuan Sistem (Objectives)
-
-1. **⚡ Visibilitas Real-Time:** Memberikan gambaran akurat mengenai persentase progres harian (*Grand Total, WO, Valve, & Instrumen*) tanpa perlu rekap manual.
-2. **🔄 Sinkronisasi 2-Arah Otomatis:** Perubahan checklist di web langsung tersimpan ke Excel, dan sebaliknya data master Excel terbaca dinamis oleh sistem.
-3. **📷 Digitalisasi Bukti Lapangan (*Paperless*):** Mendukung unggah multi-foto bukti temuan, pencatatan anomali (*abnormal findings*), dan rencana tindak lanjut perbaikan.
-4. **📊 Pelaporan Standar Industri:** Menyediakan 4 opsi laporan resmi berformat cetak PDF, ekspor spreadsheet `.xlsx` instan, serta ringkasan pesan koordinasi harian format WhatsApp.
+The system facilitates maintenance teams in monitoring, updating, and documenting the progress of hundreds of field work items (Work Orders, Motorized Valve Actuators, and Sensor Transmitters & Switches) in real-time. It features bidirectional, real-time synchronization (*two-way sync*) with Microsoft Excel master spreadsheet databases (`Template_Outage_EIC_Monitoring_unit 1.xlsx` and `Template_Outage_EIC_Monitoring_unit 2.xlsx`).
 
 ---
 
-## 🚀 3. Fitur Utama & Dokumentasi Visual (Key Features)
+## 🎯 2. System Objectives
 
-### 3.1. Dashboard Real-Time & KPI Progress
-Menyajikan matriks pencapaian outage dengan kartu ringkasan KPI otomatis.
+1. **⚡ Real-Time Visibility:** Provides an accurate overview of daily progress percentages (*Grand Total, WO, Valves, & Instruments*) without requiring manual recap.
+2. **🔄 Automatic 2-Way Sync:** Web checklist updates are instantly committed to Excel, and master Excel changes are dynamically read by the system.
+3. **📷 Digital Field Evidence (*Paperless*):** Supports multi-photo uploads for findings, abnormality logging (*abnormal findings*), and follow-up action planning.
+4. **📊 Industry Standard Reporting:** Offers 4 official PDF print-ready report formats, instant `.xlsx` spreadsheet exports, and structured WhatsApp daily briefing generators.
+
+---
+
+## 🚀 3. Key Features & Visual Documentation
+
+### 3.1. Real-Time Dashboard & KPI Progress
+Presents the outage achievement matrix with automatic KPI summary cards.
 
 <div align="center">
-  <img src="./screenshots/dashboard_dark.png" alt="Dashboard Real-Time Dark Mode" width="100%" />
+  <img src="./screenshots/dashboard_dark.png" alt="Real-Time Dashboard Dark Mode" width="100%" />
 </div>
 
-- **Progress Banner:** Menampilkan persentase pencapaian total (*Huge Metric*), rasio task selesai, dan tombol pemilih unit (**UNIT 1** / **UNIT 2**).
-- **KPI Metrik Vertikal:**
-  - 📋 **Work Order:** Total WO selesai dan rasio sub-task selesai.
-  - ⚙️ **Actuator Valves:** Status kesiapan General Inspection & Function Test.
-  - 🎛️ **Instruments:** Status verifikasi Pressure TX, Temperature TX, & Pressure Switch.
-  - 🚨 **Temuan Lapangan:** Menghitung jumlah anomali aktif yang memerlukan penanganan.
+- **Progress Banner:** Displays total achievement percentage (*Huge Metric*), completed task ratio, and unit selector buttons (**UNIT 1** / **UNIT 2**).
+- **Vertical KPI Metrics:**
+  - 📋 **Work Order:** Total completed WOs and completed sub-task ratio.
+  - ⚙️ **Actuator Valves:** Readiness status for General Inspection & Function Test.
+  - 🎛️ **Instruments:** Verification status for Pressure TX, Temperature TX, & Pressure Switch.
+  - 🚨 **Field Findings:** Counts active anomalies that require resolution.
 
 ---
 
-### 3.2. Manajemen Work Order & Batch Action
-Setiap kartu WO memuat deskripsi pekerjaan, area pembangkit, PIC pelaksana, dan checklist sub-task interaktif.
+### 3.2. Work Order Management & Batch Actions
+Each WO card includes work descriptions, plant areas, assigned PICs, and interactive sub-task checklists.
 
 <div align="center">
   <img src="./screenshots/work_order_expanded.png" alt="Work Order Expanded View" width="100%" />
 </div>
 
-- **⚡ Batch / Bulk Action:**
-  - **`✓ Selesai Semua`**: Mencentang seluruh sub-task sekaligus, mengisi tanggal hari ini, dan menaikkan status WO langsung menjadi **100% FINISH**.
-  - **`↺ Reset`**: Mengosongkan seluruh centang checklist untuk peninjauan ulang.
-- **➕ Tambah Sub-Task Fleksibel:** Mendukung input deskripsi *Manual*, memilih dari *Master Actuator*, atau memilih dari *Master Instrument*.
-- **📅 Auto-Fill Tanggal Selesai:** Tanggal selesai otomatis terisi saat seluruh checklist terpenuhi dan otomatis terhapus jika belum tuntas.
+- **⚡ Batch / Bulk Actions:**
+  - **`✓ Complete All`**: Checks all sub-tasks simultaneously, populates today's date, and advances the WO status directly to **100% FINISH**.
+  - **`↺ Reset`**: Clears all checklist checkboxes for re-evaluation.
+- **➕ Flexible Sub-Task Addition:** Supports entering descriptions *Manually*, selecting from *Master Actuators*, or selecting from *Master Instruments*.
+- **📅 Auto-Fill Completion Date:** Finish date is automatically filled when all checklist items are completed, and automatically cleared if any item remains unchecked.
 
 ---
 
-### 3.3. Monitoring Actuator Valves
-Memantau seluruh motorized actuator valve di area Boiler, Turbine, dan Auxiliary.
+### 3.3. Actuator Valve Monitoring
+Tracks all motorized actuator valves across Boiler, Turbine, and Auxiliary areas.
 
 <div align="center">
   <img src="./screenshots/actuator_valves_tab.png" alt="Actuator Valves Tab" width="100%" />
 </div>
 
-- **Checklist Inspeksi Independen:** Pemeriksaan terpisah untuk *General Inspection* (Fisik/Mekanis/Elektrikal) dan *Function Test* (Uji Buka/Tutup & Sinyal DCS).
-- **Mode Matriks Komparasi:** Memungkinkan pembandingan kesiapan actuator antara Unit 1 dan Unit 2 berdampingan.
+- **Independent Inspection Checklists:** Separate verification for *General Inspection* (Physical/Mechanical/Electrical) and *Function Test* (Open/Close Stroke & DCS Feedback).
+- **Comparison Matrix Mode:** Enables side-by-side comparison of actuator readiness between Unit 1 and Unit 2.
 
 ---
 
-### 3.4. Verifikasi & Kalibrasi Instrumen
-Monitoring instrumentasi pembangkit yang dikelompokkan ke dalam sub-tab khusus:
+### 3.4. Instrument Verification & Calibration
+Power plant instrumentation monitoring grouped into dedicated sub-tabs:
 - **Pressure Transmitter (PTX)**
 - **Temperature Transmitter (TTX)**
 - **Pressure Switch (PSW)**
@@ -110,24 +110,24 @@ Monitoring instrumentasi pembangkit yang dikelompokkan ke dalam sub-tab khusus:
 
 ---
 
-### 3.5. Pusat Laporan Resmi & Ekspor
-Akses terpadu dari tombol **`📑 Report`** di header yang menyediakan 4 format laporan standar:
+### 3.5. Official Report Center & Export
+Centralized access via the **`📑 Report`** button in the header, offering 4 standardized report formats:
 
 <div align="center">
   <img src="./screenshots/report_modal.png" alt="Report Modal" width="100%" />
 </div>
 
-1. **Laporan 1: Progress Harian & Temuan:** Rekapitulasi progres sub-task yang diselesaikan pada rentang tanggal tertentu beserta daftar temuan aktif.
-2. **Laporan 2: WO & Sub-Task Lengkap:** Rincian seluruh Work Order beserta rincian sub-task dan PIC.
-3. **Laporan 3: Actuator Valves:** Matriks status inspeksi seluruh aktuator.
-4. **Laporan 4: Instruments:** Rekap verifikasi instrumen PTX, TTX, dan PSW.
-5. **📥 Unduh Excel (.xlsx):** Mengunduh live database Excel termutakhir langsung dari browser.
-6. **🖨️ Cetak / Simpan PDF:** Format cetak resmi berstandar dokumen operasional.
+1. **Report 1: Daily Progress & Findings:** Summary of sub-tasks completed within a specific date range along with active findings.
+2. **Report 2: Full WO & Sub-Tasks:** Comprehensive breakdown of all Work Orders, sub-tasks, and assigned PICs.
+3. **Report 3: Actuator Valves:** Status matrix of all valve actuator inspections.
+4. **Report 4: Instruments:** Verification summary for PTX, TTX, and PSW instruments.
+5. **📥 Download Excel (.xlsx):** Download the latest live Excel database directly from the browser.
+6. **🖨️ Print / Save as PDF:** Standardized operational document print layout.
 
 ---
 
-### 3.6. Analisis Kurva-S & Tren Harian
-Grafik visualisasi kurva-S interaktif untuk menganalisis kecepatan pencapaian aktual harian terhadap target rencana penyelesaian outage.
+### 3.6. S-Curve Analysis & Daily Trends
+Interactive S-curve visualization chart to analyze actual daily progress velocity against planned outage completion targets.
 
 <div align="center">
   <img src="./screenshots/s_curve_graph.png" alt="S-Curve Graph Modal" width="100%" />
@@ -135,19 +135,19 @@ Grafik visualisasi kurva-S interaktif untuk menganalisis kecepatan pencapaian ak
 
 ---
 
-### 3.7. Generator Ringkasan WhatsApp
-Fitur pembuatan teks laporan ringkas harian otomatis yang terstruktur rapi untuk dibagikan ke grup koordinasi WhatsApp.
+### 3.7. WhatsApp Summary Generator
+Automatic daily summary message generator structured cleanly for sharing directly to WhatsApp coordination groups.
 
 <div align="center">
   <img src="./screenshots/whatsapp_format.png" alt="WhatsApp Generator Modal" width="100%" />
 </div>
 
-- Dilengkapi tombol 1-klik **"📋 Salin ke Clipboard"**.
+- Includes a 1-click **"📋 Copy to Clipboard"** button.
 
 ---
 
 ### 3.8. Dual Theme (Dark & Light Mode)
-Antarmuka mendukung pergantian tema gelap dan terang dengan tombol switch ikon di pojok kanan atas header.
+The interface supports dark and light mode switching via the icon toggle in the top-right header corner.
 
 <div align="center">
   <img src="./screenshots/light_mode.png" alt="Light Mode Dashboard" width="100%" />
@@ -155,22 +155,22 @@ Antarmuka mendukung pergantian tema gelap dan terang dengan tombol switch ikon d
 
 ---
 
-## 📁 4. Struktur Direktori & Arsitektur (Directory Structure)
+## 📁 4. Directory Structure & Architecture
 
 ```plaintext
 d:\msw\msw_eic_om\
 ├── server.py                                    # Backend HTTP Server, JSON API, & Embedded UI Template
-├── server.exe                                   # Standalone Binary Application (Tanpa instalasi Python)
-├── server.spec                                  # Konfigurasi Build PyInstaller
-├── start_app.bat                                # Skrip Launcher Cepat
-├── .gitignore                                   # Konfigurasi Git Ignore
-├── README.md                                    # Dokumentasi Utama Repositori (GitHub Format)
-├── Template_Outage_EIC_Monitoring_unit 1.xlsx   # Database Master Unit 1
-├── Template_Outage_EIC_Monitoring_unit 2.xlsx   # Database Master Unit 2
-├── Finding/                                     # Penyimpanan Foto & Bukti Temuan Lapangan
+├── server.exe                                   # Standalone Binary Application (No Python installation required)
+├── server.spec                                  # PyInstaller Build Configuration
+├── start_app.bat                                # Quick Launcher Script
+├── .gitignore                                   # Git Ignore Configuration
+├── README.md                                    # Main Repository Documentation
+├── Template_Outage_EIC_Monitoring_unit 1.xlsx   # Master Database Unit 1
+├── Template_Outage_EIC_Monitoring_unit 2.xlsx   # Master Database Unit 2
+├── Finding/                                     # Field Evidence & Anomaly Photo Storage
 │   ├── UNIT 1/
 │   └── UNIT 2/
-└── screenshots/                                 # Tangkapan Layar Dokumentasi Sistem
+└── screenshots/                                 # System Documentation Screenshots
     ├── dashboard_dark.png
     ├── work_order_expanded.png
     ├── actuator_valves_tab.png
@@ -183,47 +183,47 @@ d:\msw\msw_eic_om\
 
 ---
 
-## 🛠️ 5. Cara Menjalankan Aplikasi (Getting Started)
+## 🛠️ 5. Getting Started (Running the Application)
 
 <details open>
-<summary><b>🔹 Opsi 1: Menjalankan Binary Mandiri (Rekomendasi untuk User/Teknisi)</b></summary>
+<summary><b>🔹 Option 1: Run Standalone Binary (Recommended for Users / Technicians)</b></summary>
 
-Cukup klik ganda (*double-click*) file:
+Simply double-click:
 ```plaintext
 server.exe
 ```
-Aplikasi akan langsung menyalakan server lokal pada port 8000 dan membuka dashboard di browser default:
+The application will launch the local server on port 8000 and automatically open the dashboard in your default browser:
 ```plaintext
 http://localhost:8000
 ```
 </details>
 
 <details>
-<summary><b>🔹 Opsi 2: Menjalankan via Batch File Launcher</b></summary>
+<summary><b>🔹 Option 2: Run via Batch File Launcher</b></summary>
 
-Klik ganda file:
+Double-click:
 ```plaintext
 start_app.bat
 ```
 </details>
 
 <details>
-<summary><b>🔹 Opsi 3: Menjalankan dari Source Code Python (Development)</b></summary>
+<summary><b>🔹 Option 3: Run from Python Source Code (Development)</b></summary>
 
-1. Pastikan dependensi Python terpasang:
+1. Ensure Python dependencies are installed:
    ```bash
    pip install openpyxl pillow
    ```
-2. Jalankan server:
+2. Start the server:
    ```bash
    python server.py
    ```
 </details>
 
 <details>
-<summary><b>🔹 Opsi 4: Mengompilasi Ulang ke Executable (.exe)</b></summary>
+<summary><b>🔹 Option 4: Recompile to Executable (.exe)</b></summary>
 
-Jika Anda melakukan perubahan pada `server.py`, lakukan kompilasi ulang dengan perintah:
+If you make modifications to `server.py`, recompile using:
 ```powershell
 pyinstaller server.spec --distpath . -y
 ```
@@ -231,42 +231,42 @@ pyinstaller server.spec --distpath . -y
 
 ---
 
-## 🔄 6. Protokol Sinkronisasi Data Excel (Sync Protocol)
+## 🔄 6. Excel Data Synchronization Protocol
 
-Sistem menggunakan mekanisme penguncian file aman (*Thread-Safe File Lock*) untuk menjamin konsistensi data:
+The system utilizes a thread-safe file locking mechanism to guarantee data consistency and integrity:
 
-| Lembar Kerja (Sheet) | Data yang Disimpan | Mekanisme Sinkronisasi |
+| Worksheet (Sheet) | Data Stored | Synchronization Mechanism |
 | :--- | :--- | :--- |
-| **`WorkOrder`** | No WO, Deskripsi, Area, PIC, Status, % Progress, Tanggal Finish, Remarks | Diperbarui otomatis saat checklist sub-task dicentang. |
-| **`WorkOrder_Checklist`** | Sub-task WO, PIC Task, Status Selesai (TRUE/FALSE), Tanggal | Sinkronisasi dua arah real-time dengan Actuator & Instrument. |
-| **`ActuatorValve`** | Equipment ID, Area, KKS, General Inspection, Function Test, Status | Otomatis tersinkronisasi saat sub-task actuator di WO dicentang. |
-| **`Instrument_*`** | No, Tag KKS, Equipment, Range, Status Kalibrasi & Verifikasi | Otomatis tersinkronisasi saat sub-task instrumen di WO dicentang. |
+| **`WorkOrder`** | WO No, Description, Area, PIC, Status, % Progress, Finish Date, Remarks | Automatically updated when sub-task checklists are toggled. |
+| **`WorkOrder_Checklist`** | WO Sub-tasks, Task PIC, Completion Status (TRUE/FALSE), Date | Real-time bidirectional sync with Actuators & Instruments. |
+| **`ActuatorValve`** | Equipment ID, Area, KKS, General Inspection, Function Test, Status | Automatically synced when actuator sub-tasks in WO are checked. |
+| **`Instrument_*`** | No, KKS Tag, Equipment, Range, Calibration & Verification Status | Automatically synced when instrument sub-tasks in WO are checked. |
 
 ---
 
-## 💡 7. Pemecahan Masalah & FAQ (Troubleshooting)
+## 💡 7. Troubleshooting & FAQ
 
 <details>
-<summary><b>❓ Bagaimana cara mengakses dashboard dari smartphone / laptop lain di jaringan LAN?</b></summary>
+<summary><b>❓ How do I access the dashboard from another smartphone / laptop on the local network (LAN)?</b></summary>
 
-1. Pastikan kedua perangkat terhubung ke jaringan WiFi/LAN yang sama dengan komputer server.
-2. Cari IP komputer server (misal: `192.168.1.50`).
-3. Buka browser di smartphone/laptop klien dan kunjungi:
+1. Ensure both devices are connected to the same Wi-Fi / LAN network as the host server machine.
+2. Find the server machine's IP address (e.g., `192.168.1.50`).
+3. Open a browser on the client smartphone/laptop and navigate to:
    ```plaintext
    http://192.168.1.50:8000
    ```
 </details>
 
 <details>
-<summary><b>❓ Muncul pesan error "File Excel sedang terkunci" saat menyimpan:</b></summary>
+<summary><b>❓ Error message: "Excel file is locked" when saving:</b></summary>
 
-Tutup file Excel `Template_Outage_EIC_Monitoring_unit X.xlsx` jika sedang dibuka di aplikasi Microsoft Excel desktop agar server dapat menulis data perubahan secara bebas.
+Close the Excel spreadsheet `Template_Outage_EIC_Monitoring_unit X.xlsx` if it is currently open in Microsoft Excel desktop so the server can freely write modifications.
 </details>
 
 <details>
-<summary><b>❓ Bagaimana cara me-refresh data tanpa menutup browser?</b></summary>
+<summary><b>❓ How do I refresh the data without restarting the browser?</b></summary>
 
-Cukup klik badge logo **`⚡ PLTU MSW EIC`** di pojok kiri atas header atau tekan tombol keyboard **Ctrl + F5**.
+Click the **`⚡ PLTU MSW EIC`** logo badge in the top-left header corner or press **Ctrl + F5** on your keyboard.
 </details>
 
 ---
