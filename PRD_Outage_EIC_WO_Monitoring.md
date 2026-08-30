@@ -1,6 +1,6 @@
 # Product Requirements Document (PRD)
 ## Outage EIC Work Order Monitoring System
-**PLTU MSW (2 x 25 MW) &bull; Section Electric, Instrument & Control (EIC)**
+**PLTU MSW (2 x 30MW) &bull; Section Electric, Instrument & Control (EIC)**
 
 | Metrik Dokumen | Keterangan |
 | :--- | :--- |

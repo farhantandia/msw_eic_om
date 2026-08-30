@@ -1,7 +1,7 @@
 <div align="center">
 
 # ⚡ PLTU MSW EIC Outage Monitoring System
-### Real-Time Monitoring & Work Order Management Platform &bull; Unit 1 & Unit 2 (2 x 25 MW)
+### Real-Time Monitoring & Work Order Management Platform &bull; Unit 1 & Unit 2 (2 x 30MW)
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-10b981?style=for-the-badge)](https://github.com/)
@@ -38,7 +38,7 @@
 
 ## 📖 1. Pengantar & Latar Belakang (Introduction)
 
-**PLTU MSW EIC Outage Monitoring System** adalah platform pemantauan pekerjaan pemeliharaan berkala (*Overhaul / Outage*) berbasis web lokal yang dikembangkan khusus untuk **Section Electric, Instrument & Control (EIC) PLTU MSW (2 x 25 MW)**.
+**PLTU MSW EIC Outage Monitoring System** adalah platform pemantauan pekerjaan pemeliharaan berkala (*Overhaul / Outage*) berbasis web lokal yang dikembangkan khusus untuk **Section Electric, Instrument & Control (EIC) PLTU MSW (2 x 30MW)**.
 
 Sistem ini memfasilitasi tim pemeliharaan dalam memantau, memperbarui, dan mendokumentasikan progres ratusan item pekerjaan lapangan (Work Order, Motorized Valve Actuator, serta Sensor Transmitter & Switch) secara real-time yang tersinkronisasi langsung secara dua arah (*two-way synchronization*) dengan master database spreadsheet Microsoft Excel (`Template_Outage_EIC_Monitoring_unit 1.xlsx` dan `unit 2.xlsx`).
 

@@ -1173,9 +1173,9 @@ def load_unit_data(unit):
             pct = round((st["done"] / st["total"] * 100), 1) if st["total"] > 0 else 0
             area_stats.append({"area": aname, "total": st["total"], "done": st["done"], "pct": pct})
 
-        # Calculate Grand Outage Progress based on total checklist subtasks + instruments
-        grand_total = wo_subtask_total + act_subtask_total + inst_total
-        grand_done = wo_subtask_done + act_subtask_done + inst_done
+        # Calculate Grand Outage Progress based on total Work Order subtasks
+        grand_total = wo_subtask_total
+        grand_done = wo_subtask_done
         grand_pct = round((grand_done / grand_total * 100), 1) if grand_total > 0 else 0
 
         summary = {
@@ -2577,18 +2577,31 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     <!-- S-Curve & Daily Progress Trend Modal -->
     <div class="modal-overlay" id="scurve-modal">
-        <div class="modal-content" style="max-width: 820px; max-height: 90vh; display: flex; flex-direction: column;">
-            <div class="modal-header">
+        <div class="modal-content" style="max-width: 880px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="margin-bottom: 12px;">
                 <div>
-                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800;">📈 Kurva-S & Tren Progress Outage</h3>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800;">📈 Kurva-S & Tren Progress Outage Unit <span id="scurve-unit-label">1</span></h3>
                     <div style="font-size:0.8rem; color:var(--text-muted);">Grafik visual pencapaian kumulatif dan tren task harian (Work Order, Valve, & Instrumen).</div>
                 </div>
                 <button class="modal-close" onclick="closeSCurveModal()">&times;</button>
             </div>
+
+            <!-- Outage Schedule Range Control Bar -->
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; background:var(--bg-sub); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:12px; flex-shrink:0;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span style="font-size:0.82rem; font-weight:700; color:var(--text-main);">📅 Periode Outage:</span>
+                    <input type="date" id="scurve-start-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Tanggal Mulai Outage">
+                    <span style="font-size:0.8rem; color:var(--text-muted);">s/d</span>
+                    <input type="date" id="scurve-end-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Target Selesai Outage">
+                    <button class="page-btn" style="padding:4px 12px; font-size:0.8rem; font-weight:700;" onclick="renderSCurveChart()">🔄 Hitung Kurva-S</button>
+                </div>
+                <div id="scurve-kpi-badge" style="display:flex; align-items:center; gap:6px; font-size:0.8rem; font-weight:700;"></div>
+            </div>
+
             <div style="overflow-y:auto; flex-grow:1; padding-right:4px;">
                 <div id="scurve-chart-container"></div>
             </div>
-            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px;">
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px; flex-shrink:0;">
                 <button class="page-btn" onclick="closeSCurveModal()">Tutup</button>
             </div>
         </div>
@@ -2650,8 +2663,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="outage-progress-box">
                 <div class="outage-pct-huge" id="grand-pct">0%</div>
                 <div class="outage-bar-wrap">
-                    <div style="display:flex; justify-content:space-between; font-size:0.78rem; font-weight:700; margin-bottom:4px;">
-                        <span>Total Selesai</span>
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:0.78rem; font-weight:700; margin-bottom:4px; white-space:nowrap;">
+                        <span>Total Selesai: </span>
                         <span id="grand-counts">0 / 0 Item</span>
                     </div>
                     <div class="outage-bar-bg"><div class="outage-bar-fill" id="grand-bar-fill" style="width:0%;"></div></div>
@@ -3737,7 +3750,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div style="display:flex; flex-direction:column; gap:20px;">
                 <!-- Master PIC Card -->
                 <div style="background:var(--bg-card); border-radius:var(--radius-lg); padding:22px; border:1px solid var(--border-color);">
-                    <h3 style="margin-bottom:8px; color:var(--primary); font-size:1.1rem; font-weight:800;">👥 Master PIC Tim EIC</h3>
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:8px;">
+                        <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0;">👥 Master PIC Tim EIC</h3>
+                        <button class="btn-print" style="padding:7px 16px; font-size:0.85rem; font-weight:700; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:var(--primary); cursor:pointer; border-radius:var(--radius-md);" onclick="openReportModal()" title="Buka Pusat Laporan & Cetak PDF">📑 Menu Laporan & Cetak PDF</button>
+                    </div>
                     <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:16px;">Daftar nama penanggung jawab EIC. Semua pilihan dropdown PIC di Work Order, Actuator, & Instrumen tersinkron otomatis dari daftar master ini.</p>
                     
                     <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px;">
@@ -4081,6 +4097,184 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         let currentReportType = 'harian';
 
+        function generateSCurveHTMLForReport() {
+            if(!fullData) return '';
+
+            const dateMap = {};
+            let totalTasks = 0;
+            let undatedCount = 0;
+
+            (fullData.work_orders || []).forEach(w => {
+                const chk = w.checklist || [];
+                if(chk.length > 0) {
+                    totalTasks += chk.length;
+                    chk.forEach(c => {
+                        if(c.selesai) {
+                            const dStr = c.tanggal || w.tanggal_finish || w.tanggal_actual_start || w.tanggal_schedule;
+                            const parsed = extractValidDate(dStr);
+                            if(parsed && parsed.ymd) {
+                                dateMap[parsed.ymd] = (dateMap[parsed.ymd] || 0) + 1;
+                            } else {
+                                undatedCount += 1;
+                            }
+                        }
+                    });
+                } else {
+                    totalTasks += 1;
+                    if(w.status === 'FINISH') {
+                        const dStr = w.tanggal_finish || w.tanggal_actual_start || w.tanggal_schedule;
+                        const parsed = extractValidDate(dStr);
+                        if(parsed && parsed.ymd) {
+                            dateMap[parsed.ymd] = (dateMap[parsed.ymd] || 0) + 1;
+                        } else {
+                            undatedCount += 1;
+                        }
+                    }
+                }
+            });
+
+            let savedStart = localStorage.getItem(`eic_scurve_start_u${currentUnit}`);
+            let savedEnd = localStorage.getItem(`eic_scurve_end_u${currentUnit}`);
+
+            const activeYMDs = Object.keys(dateMap).sort();
+            if(!savedStart) savedStart = activeYMDs.length > 0 ? activeYMDs[0] : '2026-08-20';
+            if(!savedEnd) {
+                const latestActive = activeYMDs.length > 0 ? activeYMDs[activeYMDs.length - 1] : '2026-08-30';
+                const d = new Date(latestActive);
+                d.setDate(d.getDate() + 5);
+                savedEnd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+
+            const startDateObj = new Date(savedStart);
+            const endDateObj = new Date(savedEnd);
+            let dayDiff = Math.round((endDateObj - startDateObj) / 86400000);
+            if(dayDiff < 1) dayDiff = 1;
+            const totalDays = dayDiff + 1;
+
+            let cumActualCount = undatedCount;
+            Object.keys(dateMap).forEach(ymd => {
+                if(ymd < savedStart) {
+                    cumActualCount += dateMap[ymd];
+                }
+            });
+
+            const timeline = [];
+            const todayTime = new Date().setHours(23, 59, 59, 999);
+
+            for(let i = 0; i < totalDays; i++) {
+                const cur = new Date(startDateObj);
+                cur.setDate(cur.getDate() + i);
+                const ymd = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
+                const shortLabel = `${cur.getDate()} ${cur.toLocaleString('id-ID', { month: 'short' })}`;
+                const time = cur.getTime();
+
+                const x = totalDays > 1 ? (i / (totalDays - 1)) : 1.0;
+                const k = 7.0;
+                const sRaw = 1.0 / (1.0 + Math.exp(-k * (x - 0.5)));
+                const sMin = 1.0 / (1.0 + Math.exp(-k * (0 - 0.5)));
+                const sMax = 1.0 / (1.0 + Math.exp(-k * (1 - 0.5)));
+                const targetPct = Math.round(((sRaw - sMin) / (sMax - sMin)) * 1000) / 10;
+
+                const dailyCount = dateMap[ymd] || 0;
+                let actualPct = null;
+                if(time <= todayTime) {
+                    cumActualCount += dailyCount;
+                    actualPct = totalTasks > 0 ? Math.min(100, Math.round((cumActualCount / totalTasks) * 1000) / 10) : 0;
+                }
+
+                timeline.push({
+                    index: i,
+                    ymd: ymd,
+                    shortLabel: shortLabel,
+                    time: time,
+                    daily: dailyCount,
+                    cumActual: actualPct !== null ? cumActualCount : null,
+                    actualPct: actualPct,
+                    targetPct: targetPct
+                });
+            }
+
+            const actualPoints = timeline.filter(t => t.actualPct !== null);
+            const latestActual = actualPoints.length > 0 ? actualPoints[actualPoints.length - 1] : { actualPct: 0, targetPct: 0, cumActual: 0 };
+            const variance = Math.round((latestActual.actualPct - latestActual.targetPct) * 10) / 10;
+
+            const svgW = 780;
+            const svgH = 200;
+            const padL = 45;
+            const padR = 25;
+            const padT = 20;
+            const padB = 32;
+            const graphW = svgW - padL - padR;
+            const graphH = svgH - padT - padB;
+
+            const n = timeline.length;
+            const getX = (i) => padL + (n === 1 ? graphW / 2 : (i / (n - 1)) * graphW);
+            const getY = (pct) => padT + graphH - (pct / 100) * graphH;
+
+            const targetPathPoints = timeline.map((pt, i) => `${getX(i)},${getY(pt.targetPct)}`);
+            const targetPathD = `M ${targetPathPoints.join(' L ')}`;
+
+            let actualPathD = '';
+            let fillD = '';
+            if(actualPoints.length > 0) {
+                const pts = actualPoints.map(pt => `${getX(pt.index)},${getY(pt.actualPct)}`);
+                actualPathD = `M ${pts.join(' L ')}`;
+                const lastPt = actualPoints[actualPoints.length - 1];
+                const firstPt = actualPoints[0];
+                fillD = `${actualPathD} L ${getX(lastPt.index)} ${padT + graphH} L ${getX(firstPt.index)} ${padT + graphH} Z`;
+            }
+
+            const labelInterval = Math.max(1, Math.ceil(n / 8));
+
+            return `
+            <div style="margin-top:18px; margin-bottom:14px; background:var(--bg-sub); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:12px; page-break-inside:avoid;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <div style="font-size:0.88rem; font-weight:800; color:var(--primary);">📈 KURVA-S MONITORING PROGRESS OUTAGE UNIT ${currentUnit} (TARGET VS REALISASI)</div>
+                    <div style="font-size:0.8rem; font-weight:700; color:${variance >= 0 ? '#10b981' : '#f43f5e'};">
+                        Realisasi: ${latestActual.actualPct}% &bull; Target: ${latestActual.targetPct}% (${variance >= 0 ? '+' : ''}${variance}% Deviasi)
+                    </div>
+                </div>
+                <svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%; height:auto; background:var(--bg-card); border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+                    ${[0, 25, 50, 75, 100].map(p => {
+                        const y = getY(p);
+                        return `
+                        <line x1="${padL}" y1="${y}" x2="${svgW - padR}" y2="${y}" stroke="var(--border-color)" stroke-dasharray="4 4" stroke-width="1"/>
+                        <text x="${padL - 8}" y="${y + 4}" fill="var(--text-muted)" font-size="9" text-anchor="end" font-family="'JetBrains Mono'">${p}%</text>`;
+                    }).join('')}
+                    ${fillD ? `<path d="${fillD}" fill="url(#rpt-scurve-grad)" opacity="0.25"/>` : ''}
+                    <path d="${targetPathD}" fill="none" stroke="#94a3b8" stroke-dasharray="5 3" stroke-width="2"/>
+                    ${actualPathD ? `<path d="${actualPathD}" fill="none" stroke="var(--primary)" stroke-width="3" stroke-linecap="round"/>` : ''}
+                    ${actualPoints.map(pt => {
+                        const x = getX(pt.index);
+                        const y = getY(pt.actualPct);
+                        return `
+                        <circle cx="${x}" cy="${y}" r="3.5" fill="var(--primary)" stroke="#fff" stroke-width="1.5"/>
+                        <text x="${x}" y="${y - 6}" fill="var(--primary)" font-size="8.5" font-weight:800; text-anchor="middle" font-family="'JetBrains Mono'">${pt.actualPct}%</text>`;
+                    }).join('')}
+                    ${timeline.map((pt, i) => {
+                        if(i % labelInterval === 0 || i === n - 1) {
+                            const x = getX(i);
+                            return `<text x="${x}" y="${svgH - 9}" fill="var(--text-muted)" font-size="8.5" font-weight:600; text-anchor="middle" font-family="'JetBrains Mono'">${pt.shortLabel}</text>`;
+                        }
+                        return '';
+                    }).join('')}
+                    <defs>
+                        <linearGradient id="rpt-scurve-grad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="var(--primary)" stop-opacity="0.8"/>
+                            <stop offset="100%" stop-color="var(--primary)" stop-opacity="0.0"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:0.75rem; color:var(--text-muted);">
+                    <div>Total Sub-Task WO: <strong>${totalTasks} sub-task</strong> &bull; Sub-Task Selesai: <strong style="color:var(--primary);">${latestActual.cumActual} sub-task (${latestActual.actualPct}%)</strong></div>
+                    <div style="display:flex; gap:12px;">
+                        <span><span style="width:10px; height:3px; background:var(--primary); display:inline-block; vertical-align:middle; border-radius:1px;"></span> Realisasi Aktual</span>
+                        <span><span style="width:10px; height:2px; background:#94a3b8; border-top:2px dashed #94a3b8; display:inline-block; vertical-align:middle;"></span> Target Rencana</span>
+                    </div>
+                </div>
+            </div>`;
+        }
+
         function setReportType(type) {
             currentReportType = type;
             ['harian', 'wo_detail', 'actuator', 'instruments'].forEach(t => {
@@ -4256,6 +4450,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                 </div>
 
+                ${generateSCurveHTMLForReport()}
+
                 <div class="report-section-title" style="margin-top:22px;">
                     📋 2. DAFTAR UPDATE PEKERJAAN YANG DISELESAIKAN (WO, ACTUATOR & INSTRUMENT)
                     <span style="font-size:0.8rem; font-weight:600; color:var(--text-muted); float:right;">Total: ${completedTasks.length} Item Update</span>
@@ -4379,6 +4575,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <div class="report-kpi-sub">${s.wo.subtask_done} / ${s.wo.subtask_total} Sub-Task Selesai</div>
                     </div>
                 </div>
+
+                ${generateSCurveHTMLForReport()}
 
                 <div class="report-section-title" style="margin-top:22px;">
                     📋 2. RINCIAN SELURUH WORK ORDER & CHECKLIST SUB-TASK (${woList.length} WO)
@@ -5480,12 +5678,99 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         /* ---------------- S-CURVE, WA SUMMARY & EXCEL MODALS ---------------- */
+        function extractValidDate(str) {
+            if(!str) return null;
+            str = String(str).trim();
+            if(['amp', 'msw', 'japa', 'farhan', 'sched-ok', 'in progress', 'finish', 'true', 'false'].includes(str.toLowerCase())) {
+                return null;
+            }
+            // YYYY-MM-DD
+            let m = str.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+            if(m) {
+                let yr = parseInt(m[1]), mo = parseInt(m[2]), da = parseInt(m[3]);
+                if(mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+                    return {
+                        ymd: `${yr}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`,
+                        dmy: `${String(da).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${yr}`,
+                        time: new Date(yr, mo - 1, da).getTime()
+                    };
+                }
+            }
+            // DD/MM/YYYY or DD-MM-YYYY
+            m = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+            if(m) {
+                let da = parseInt(m[1]), mo = parseInt(m[2]), yr = parseInt(m[3]);
+                if(mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+                    return {
+                        ymd: `${yr}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`,
+                        dmy: `${String(da).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${yr}`,
+                        time: new Date(yr, mo - 1, da).getTime()
+                    };
+                }
+            }
+            return null;
+        }
+
         function openSCurveModal() {
+            const unitLabel = document.getElementById('scurve-unit-label');
+            if(unitLabel) unitLabel.innerText = currentUnit;
+
+            // Load saved outage start and end dates from localStorage
+            let savedStart = localStorage.getItem(`eic_scurve_start_u${currentUnit}`);
+            let savedEnd = localStorage.getItem(`eic_scurve_end_u${currentUnit}`);
+
+            // If not found in localStorage, discover from data
+            if(!savedStart || !savedEnd) {
+                let allTimes = [];
+                const checkItem = (dStr) => {
+                    const parsed = extractValidDate(dStr);
+                    if(parsed) allTimes.push(parsed.time);
+                };
+                (fullData.work_orders || []).forEach(w => {
+                    (w.checklist || []).forEach(c => { if(c.tanggal) checkItem(c.tanggal); });
+                    if(w.tanggal_finish) checkItem(w.tanggal_finish);
+                });
+                (fullData.actuators || []).forEach(a => { if(a.finish_date) checkItem(a.finish_date); });
+                (fullData.pressure_tx || []).forEach(i => { if(i.tanggal || i.finish_date) checkItem(i.tanggal || i.finish_date); });
+                (fullData.temperature_tx || []).forEach(i => { if(i.tanggal || i.finish_date) checkItem(i.tanggal || i.finish_date); });
+                (fullData.pressure_switch || []).forEach(i => { if(i.dated || i.finish_date) checkItem(i.dated || i.finish_date); });
+
+                let minTime = allTimes.length > 0 ? Math.min(...allTimes) : new Date().getTime();
+                let maxTime = allTimes.length > 0 ? Math.max(...allTimes) : new Date().getTime();
+
+                const toYMD = (t) => {
+                    const d = new Date(t);
+                    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                };
+
+                if(!savedStart) {
+                    savedStart = toYMD(minTime);
+                }
+                if(!savedEnd) {
+                    let endT = Math.max(minTime + 14 * 86400000, maxTime + 4 * 86400000);
+                    savedEnd = toYMD(endT);
+                }
+            }
+
+            const startInp = document.getElementById('scurve-start-date');
+            const endInp = document.getElementById('scurve-end-date');
+            if(startInp) startInp.value = savedStart;
+            if(endInp) endInp.value = savedEnd;
+
             renderSCurveChart();
             document.getElementById('scurve-modal').classList.add('open');
         }
+
         function closeSCurveModal() {
             document.getElementById('scurve-modal').classList.remove('open');
+        }
+
+        function saveAndRenderSCurve() {
+            const startVal = document.getElementById('scurve-start-date').value;
+            const endVal = document.getElementById('scurve-end-date').value;
+            if(startVal) localStorage.setItem(`eic_scurve_start_u${currentUnit}`, startVal);
+            if(endVal) localStorage.setItem(`eic_scurve_end_u${currentUnit}`, endVal);
+            renderSCurveChart();
         }
 
         function openWaSummaryModal() {
@@ -5550,99 +5835,168 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function renderSCurveChart() {
             const chartBox = document.getElementById('scurve-chart-container');
+            const kpiBadge = document.getElementById('scurve-kpi-badge');
             if(!chartBox || !fullData) return;
 
-            // Collect all completed dates and count tasks per date
-            const dateMap = {};
+            // Collect all completed Work Order subtasks per normalized date
+            const dateMap = {}; // key: YYYY-MM-DD -> count
             let totalTasks = 0;
+            let totalCompletedWO = 0;
+            let undatedCount = 0;
 
-            // Total tasks pool
             (fullData.work_orders || []).forEach(w => {
                 const chk = w.checklist || [];
                 if(chk.length > 0) {
                     totalTasks += chk.length;
                     chk.forEach(c => {
-                        if(c.selesai && c.tanggal) {
-                            dateMap[c.tanggal] = (dateMap[c.tanggal] || 0) + 1;
+                        if(c.selesai) {
+                            totalCompletedWO += 1;
+                            const dStr = c.tanggal || w.tanggal_finish || w.tanggal_actual_start || w.tanggal_schedule;
+                            const parsed = extractValidDate(dStr);
+                            if(parsed && parsed.ymd) {
+                                dateMap[parsed.ymd] = (dateMap[parsed.ymd] || 0) + 1;
+                            } else {
+                                undatedCount += 1;
+                            }
                         }
                     });
                 } else {
                     totalTasks += 1;
-                    if(w.status === 'FINISH' && w.tanggal_finish) {
-                        dateMap[w.tanggal_finish] = (dateMap[w.tanggal_finish] || 0) + 1;
+                    if(w.status === 'FINISH') {
+                        totalCompletedWO += 1;
+                        const dStr = w.tanggal_finish || w.tanggal_actual_start || w.tanggal_schedule;
+                        const parsed = extractValidDate(dStr);
+                        if(parsed && parsed.ymd) {
+                            dateMap[parsed.ymd] = (dateMap[parsed.ymd] || 0) + 1;
+                        } else {
+                            undatedCount += 1;
+                        }
                     }
                 }
             });
 
-            (fullData.actuators || []).forEach(a => {
-                totalTasks += 2; // 2 checklists
-                if(a.general_inspection && a.finish_date) dateMap[a.finish_date] = (dateMap[a.finish_date] || 0) + 1;
-                if(a.function_test && a.finish_date) dateMap[a.finish_date] = (dateMap[a.finish_date] || 0) + 1;
-            });
+            // Read configured start & end date
+            const startInput = document.getElementById('scurve-start-date');
+            const endInput = document.getElementById('scurve-end-date');
+            let startYMD = startInput ? startInput.value : '';
+            let endYMD = endInput ? endInput.value : '';
 
-            const countInst = (list) => {
-                (list || []).forEach(inst => {
-                    totalTasks += 1;
-                    const d = inst.tanggal || inst.finish_date || inst.dated;
-                    if(inst.verifikasi && d) {
-                        dateMap[d] = (dateMap[d] || 0) + 1;
-                    }
-                });
-            };
-            countInst(fullData.pressure_tx);
-            countInst(fullData.temperature_tx);
-            countInst(fullData.pressure_switch);
-
-            // Sort unique dates
-            const sortedDates = Object.keys(dateMap).sort((a, b) => {
-                return (parseDateStrToTime(a) || 0) - (parseDateStrToTime(b) || 0);
-            });
-
-            if(sortedDates.length === 0) {
-                chartBox.innerHTML = `
-                <div style="padding:40px 20px; text-align:center; color:var(--text-muted);">
-                    <div style="font-size:2rem; margin-bottom:8px;">📈</div>
-                    Belum ada data tanggal selesai yang tercatat pada WO, Valve, atau Instrumen.<br>Centang sub-task atau instrumen untuk melihat grafik S-Curve.
-                </div>`;
-                return;
+            // Fallback if empty
+            const activeYMDs = Object.keys(dateMap).sort();
+            if(!startYMD) startYMD = activeYMDs.length > 0 ? activeYMDs[0] : '2026-08-20';
+            if(!endYMD) {
+                const latestActive = activeYMDs.length > 0 ? activeYMDs[activeYMDs.length - 1] : '2026-08-30';
+                const d = new Date(latestActive);
+                d.setDate(d.getDate() + 5);
+                endYMD = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
             }
 
-            // Build cumulative progress
-            let cumCount = 0;
-            const dataPoints = sortedDates.map(d => {
-                const cnt = dateMap[d];
-                cumCount += cnt;
-                const pct = totalTasks > 0 ? Math.min(100, Math.round((cumCount / totalTasks) * 1000) / 10) : 0;
-                return { date: d, daily: cnt, cum: cumCount, pct: pct };
+            const startDateObj = new Date(startYMD);
+            const endDateObj = new Date(endYMD);
+            let dayDiff = Math.round((endDateObj - startDateObj) / 86400000);
+            if(dayDiff < 1) dayDiff = 1;
+            const totalDays = dayDiff + 1;
+
+            // Baseline count: all completed subtasks dated BEFORE startYMD + undated ones
+            let cumActualCount = undatedCount;
+            Object.keys(dateMap).forEach(ymd => {
+                if(ymd < startYMD) {
+                    cumActualCount += dateMap[ymd];
+                }
             });
 
+            // Generate daily timeline
+            const timeline = [];
+            const todayTime = new Date().setHours(23, 59, 59, 999);
+
+            for(let i = 0; i < totalDays; i++) {
+                const cur = new Date(startDateObj);
+                cur.setDate(cur.getDate() + i);
+                const ymd = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
+                const dmy = `${String(cur.getDate()).padStart(2, '0')}/${String(cur.getMonth() + 1).padStart(2, '0')}/${cur.getFullYear()}`;
+                const shortLabel = `${cur.getDate()} ${cur.toLocaleString('id-ID', { month: 'short' })}`;
+                const time = cur.getTime();
+
+                // Target Planned S-Curve using normalized sigmoid
+                const x = totalDays > 1 ? (i / (totalDays - 1)) : 1.0;
+                const k = 7.0;
+                const sRaw = 1.0 / (1.0 + Math.exp(-k * (x - 0.5)));
+                const sMin = 1.0 / (1.0 + Math.exp(-k * (0 - 0.5)));
+                const sMax = 1.0 / (1.0 + Math.exp(-k * (1 - 0.5)));
+                const targetPct = Math.round(((sRaw - sMin) / (sMax - sMin)) * 1000) / 10;
+
+                // Actual Count
+                const dailyCount = dateMap[ymd] || 0;
+                let actualPct = null;
+                if(time <= todayTime) {
+                    cumActualCount += dailyCount;
+                    actualPct = totalTasks > 0 ? Math.min(100, Math.round((cumActualCount / totalTasks) * 1000) / 10) : 0;
+                }
+
+                timeline.push({
+                    index: i,
+                    ymd: ymd,
+                    dmy: dmy,
+                    shortLabel: shortLabel,
+                    time: time,
+                    daily: dailyCount,
+                    cumActual: actualPct !== null ? cumActualCount : null,
+                    actualPct: actualPct,
+                    targetPct: targetPct
+                });
+            }
+
+            // Latest actual vs plan variance
+            const actualPoints = timeline.filter(t => t.actualPct !== null);
+            const latestActual = actualPoints.length > 0 ? actualPoints[actualPoints.length - 1] : { actualPct: 0, targetPct: 0, cumActual: 0 };
+            const variance = Math.round((latestActual.actualPct - latestActual.targetPct) * 10) / 10;
+
+            if(kpiBadge) {
+                if(variance >= 0) {
+                    kpiBadge.innerHTML = `<span style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.4); padding:3px 10px; border-radius:12px;">✅ Ahead (+${variance}%)</span>`;
+                } else {
+                    kpiBadge.innerHTML = `<span style="background:rgba(244,63,94,0.15); color:#f43f5e; border:1px solid rgba(244,63,94,0.4); padding:3px 10px; border-radius:12px;">⚠️ Behind (${variance}%)</span>`;
+                }
+            }
+
             // SVG dimensions
-            const svgW = 740;
-            const svgH = 260;
-            const padL = 50;
-            const padR = 30;
+            const svgW = 780;
+            const svgH = 270;
+            const padL = 48;
+            const padR = 28;
             const padT = 30;
             const padB = 40;
             const graphW = svgW - padL - padR;
             const graphH = svgH - padT - padB;
 
-            const n = dataPoints.length;
+            const n = timeline.length;
             const getX = (i) => padL + (n === 1 ? graphW / 2 : (i / (n - 1)) * graphW);
             const getY = (pct) => padT + graphH - (pct / 100) * graphH;
 
-            let pathD = '';
+            // Target Planned Path (Dashed)
             let targetPathD = '';
-            dataPoints.forEach((pt, i) => {
+            timeline.forEach((pt, i) => {
                 const x = getX(i);
-                const y = getY(pt.pct);
-                pathD += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
-                const targetPct = Math.round(((i + 1) / n) * 100);
-                const targetY = getY(targetPct);
-                targetPathD += (i === 0 ? `M ${x} ${targetY}` : ` L ${x} ${targetY}`);
+                const y = getY(pt.targetPct);
+                targetPathD += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
             });
 
-            // Fill area
-            const fillD = `${pathD} L ${getX(n - 1)} ${padT + graphH} L ${getX(0)} ${padT + graphH} Z`;
+            // Actual Progress Path
+            let actualPathD = '';
+            let fillD = '';
+            if(actualPoints.length > 0) {
+                actualPoints.forEach((pt, i) => {
+                    const x = getX(pt.index);
+                    const y = getY(pt.actualPct);
+                    actualPathD += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+                });
+                const lastPt = actualPoints[actualPoints.length - 1];
+                const firstPt = actualPoints[0];
+                fillD = `${actualPathD} L ${getX(lastPt.index)} ${padT + graphH} L ${getX(firstPt.index)} ${padT + graphH} Z`;
+            }
+
+            // X-axis label decimation for neat layout
+            const labelInterval = Math.max(1, Math.ceil(n / 8));
 
             let svgHTML = `
             <svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%; height:auto; background:var(--bg-sub); border-radius:var(--radius-md); border:1px solid var(--border-color);">
@@ -5654,67 +6008,112 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <text x="${padL - 8}" y="${y + 4}" fill="var(--text-muted)" font-size="10" text-anchor="end" font-family="'JetBrains Mono'">${p}%</text>`;
                 }).join('')}
 
-                <!-- Fill Area -->
-                <path d="${fillD}" fill="url(#scurve-grad)" opacity="0.25"/>
+                <!-- Fill Area under Actual Curve -->
+                ${fillD ? `<path d="${fillD}" fill="url(#scurve-grad)" opacity="0.28"/>` : ''}
 
-                <!-- Target Line (Dashed) -->
-                <path d="${targetPathD}" fill="none" stroke="var(--text-muted)" stroke-dasharray="5 5" stroke-width="2"/>
+                <!-- Target Plan Line (Dashed) -->
+                <path d="${targetPathD}" fill="none" stroke="#94a3b8" stroke-dasharray="6 4" stroke-width="2.5"/>
 
                 <!-- Actual Curve Line -->
-                <path d="${pathD}" fill="none" stroke="var(--primary)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+                ${actualPathD ? `<path d="${actualPathD}" fill="none" stroke="var(--primary)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
 
-                <!-- Points & Labels -->
-                ${dataPoints.map((pt, i) => {
-                    const x = getX(i);
-                    const y = getY(pt.pct);
+                <!-- Actual Points & Value Tooltips -->
+                ${actualPoints.map(pt => {
+                    const x = getX(pt.index);
+                    const y = getY(pt.actualPct);
                     return `
-                    <circle cx="${x}" cy="${y}" r="5" fill="var(--primary)" stroke="#fff" stroke-width="2"/>
-                    <text x="${x}" y="${y - 10}" fill="var(--primary)" font-size="10" font-weight="bold" text-anchor="middle" font-family="'JetBrains Mono'">${pt.pct}%</text>
-                    <text x="${x}" y="${svgH - 12}" fill="var(--text-muted)" font-size="9" text-anchor="middle" font-family="'JetBrains Mono'">${pt.date}</text>`;
+                    <circle cx="${x}" cy="${y}" r="5" fill="var(--primary)" stroke="#fff" stroke-width="2">
+                        <title>${pt.dmy}: Selesai +${pt.daily} task | Total: ${pt.cumActual}/${totalTasks} (${pt.actualPct}%) | Target: ${pt.targetPct}%</title>
+                    </circle>
+                    <text x="${x}" y="${y - 9}" fill="var(--primary)" font-size="10" font-weight="800" text-anchor="middle" font-family="'JetBrains Mono'">${pt.actualPct}%</text>`;
+                }).join('')}
+
+                <!-- X Axis Labels -->
+                ${timeline.map((pt, i) => {
+                    if(i % labelInterval === 0 || i === n - 1) {
+                        const x = getX(i);
+                        return `<text x="${x}" y="${svgH - 12}" fill="var(--text-muted)" font-size="9.5" font-weight="600" text-anchor="middle" font-family="'JetBrains Mono'">${pt.shortLabel}</text>`;
+                    }
+                    return '';
                 }).join('')}
 
                 <defs>
                     <linearGradient id="scurve-grad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stop-color="var(--primary)" stop-opacity="0.8"/>
+                        <stop offset="0%" stop-color="var(--primary)" stop-opacity="0.85"/>
                         <stop offset="100%" stop-color="var(--primary)" stop-opacity="0.0"/>
                     </linearGradient>
                 </defs>
             </svg>`;
 
-            // Summary Breakdown Table
+            // KPI Stat Cards
+            let kpiCardsHTML = `
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:14px;">
+                <div class="report-kpi-card" style="padding:10px;">
+                    <div class="report-kpi-lbl">Total Sub-Task WO</div>
+                    <div class="report-kpi-val" style="font-size:1.3rem;">${totalTasks} <span style="font-size:0.75rem; color:var(--text-muted);">sub-task</span></div>
+                    <div class="report-kpi-sub">Total Sub-Task Work Order</div>
+                </div>
+                <div class="report-kpi-card highlight" style="padding:10px;">
+                    <div class="report-kpi-lbl">Realisasi Aktual</div>
+                    <div class="report-kpi-val" style="font-size:1.3rem; color:var(--primary);">${latestActual.actualPct}%</div>
+                    <div class="report-kpi-sub">${latestActual.cumActual} / ${totalTasks} sub-task selesai</div>
+                </div>
+                <div class="report-kpi-card" style="padding:10px;">
+                    <div class="report-kpi-lbl">Target Rencana</div>
+                    <div class="report-kpi-val" style="font-size:1.3rem; color:#94a3b8;">${latestActual.targetPct}%</div>
+                    <div class="report-kpi-sub">Baseline S-Curve Hari Ini</div>
+                </div>
+                <div class="report-kpi-card" style="padding:10px; border-left:3px solid ${variance >= 0 ? '#10b981' : '#f43f5e'};">
+                    <div class="report-kpi-lbl">Deviasi Progres</div>
+                    <div class="report-kpi-val" style="font-size:1.3rem; color:${variance >= 0 ? '#10b981' : '#f43f5e'};">${variance >= 0 ? '+' : ''}${variance}%</div>
+                    <div class="report-kpi-sub">${variance >= 0 ? 'Ahead of Schedule' : 'Behind Schedule'}</div>
+                </div>
+            </div>`;
+
+            // Active Daily Breakdown Table (Only days with activity or milestone)
+            const activeBreakdown = timeline.filter(t => t.daily > 0 || t.cumActual !== null);
             let tableHTML = `
             <div style="margin-top:16px;">
-                <div style="font-size:0.85rem; font-weight:700; color:var(--text-main); margin-bottom:8px;">📊 Rincian Capaian Per Hari:</div>
+                <div style="font-size:0.85rem; font-weight:700; color:var(--text-main); margin-bottom:8px;">📊 Rincian Capaian Per Tanggal:</div>
                 <table class="dense-table" style="font-size:0.8rem;">
                     <thead>
                         <tr>
                             <th>Tanggal</th>
                             <th style="text-align:center;">Task Selesai Hari Ini</th>
-                            <th style="text-align:center;">Kumulatif Selesai</th>
-                            <th style="text-align:center;">Progress Kumulatif</th>
+                            <th style="text-align:center;">Kumulatif Realisasi</th>
+                            <th style="text-align:center;">Progres Aktual</th>
+                            <th style="text-align:center;">Target Rencana</th>
+                            <th style="text-align:center;">Status</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${dataPoints.map(pt => `
+                        ${activeBreakdown.map(pt => {
+                            const dev = pt.actualPct !== null ? Math.round((pt.actualPct - pt.targetPct) * 10) / 10 : null;
+                            return `
                             <tr>
-                                <td style="font-family:'JetBrains Mono'; font-weight:700;">📅 ${pt.date}</td>
-                                <td style="text-align:center; color:var(--status-finish); font-weight:700;">+${pt.daily} task</td>
-                                <td style="text-align:center; font-family:'JetBrains Mono';">${pt.cum} / ${totalTasks}</td>
-                                <td style="text-align:center; font-family:'JetBrains Mono'; font-weight:800; color:var(--primary);">${pt.pct}%</td>
-                            </tr>
-                        `).join('')}
+                                <td style="font-family:'JetBrains Mono'; font-weight:700;">📅 ${pt.dmy}</td>
+                                <td style="text-align:center; color:var(--status-finish); font-weight:700;">${pt.daily > 0 ? '+' + pt.daily + ' task' : '-'}</td>
+                                <td style="text-align:center; font-family:'JetBrains Mono';">${pt.cumActual !== null ? pt.cumActual + ' / ' + totalTasks : '-'}</td>
+                                <td style="text-align:center; font-family:'JetBrains Mono'; font-weight:800; color:var(--primary);">${pt.actualPct !== null ? pt.actualPct + '%' : '-'}</td>
+                                <td style="text-align:center; font-family:'JetBrains Mono'; color:var(--text-muted);">${pt.targetPct}%</td>
+                                <td style="text-align:center;">
+                                    ${dev !== null ? (dev >= 0 ? `<span class="badge badge-success" style="font-size:0.7rem;">+${dev}% Ahead</span>` : `<span class="badge badge-error" style="font-size:0.7rem;">${dev}% Behind</span>`) : '-'}
+                                </td>
+                            </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>`;
 
             chartBox.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <div style="font-size:0.85rem; color:var(--text-muted);">
-                    Kurva-S Kumulatif Real-Time Outage Unit ${currentUnit}
+            ${kpiCardsHTML}
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:0.8rem; color:var(--text-muted);">
+                    Kurva-S Real-Time Outage Unit ${currentUnit} (${startYMD} s/d ${endYMD})
                 </div>
                 <div style="display:flex; gap:14px; font-size:0.75rem;">
-                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:3px; background:var(--primary); display:inline-block; border-radius:2px;"></span> Progress Aktual</span>
-                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:2px; background:var(--text-muted); border-top:2px dashed var(--text-muted); display:inline-block;"></span> Target Rencana</span>
+                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:3.5px; background:var(--primary); display:inline-block; border-radius:2px;"></span> Progres Aktual</span>
+                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:2px; background:#94a3b8; border-top:2px dashed #94a3b8; display:inline-block;"></span> Target Rencana S-Curve</span>
                 </div>
             </div>
             ${svgHTML}
