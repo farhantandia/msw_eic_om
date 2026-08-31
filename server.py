@@ -323,10 +323,6 @@ def save_add_subtask(data):
                     if total_cnt > 0:
                         pct = round((done_cnt / total_cnt) * 100, 1)
                         r[11].value = pct
-                    inst_desc = str(row[2].value or '').strip()
-                    inst_kks = str(row[3].value or '').strip()
-                    inst_no = str(row[0].value or '').strip()
-                    sync_instrument_to_subtasks(wb, inst_type, inst_kks, inst_no, inst_desc, status_wdone, today_str)
                     break
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
@@ -783,6 +779,11 @@ def save_quick_instrument_toggle(data):
                     else:
                         row[7].value = status_wdone
                         row[6].value = today_str if status_wdone else None
+
+                    inst_desc = str(row[2].value or '').strip()
+                    inst_kks = str(row[3].value or '').strip()
+                    inst_no = str(row[0].value or '').strip()
+                    sync_instrument_to_subtasks(wb, inst_type, inst_kks, inst_no, inst_desc, status_wdone, today_str)
                     break
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
@@ -861,10 +862,19 @@ def save_bulk_instrument_update(data):
                     row_kks = str(row[3].value).strip() if row[3].value else ""
                     row_no = str(row[0].value).strip() if row[0].value else ""
                     if row_kks == key or row_no == key:
+                        today_str = datetime.date.today().strftime("%d/%m/%Y")
                         if itype in ["pressure_tx", "temperature_tx", "ptx", "ttx"]:
                             row[7].value = status_wdone
+                            row[6].value = today_str if status_wdone else None
                         elif itype in ["pressure_switch", "psw"]:
                             row[13].value = status_wdone
+                            row[14].value = today_str if status_wdone else None
+                            row[15].value = today_str if status_wdone else None
+
+                        inst_desc = str(row[2].value or '').strip()
+                        inst_kks = str(row[3].value or '').strip()
+                        inst_no = str(row[0].value or '').strip()
+                        sync_instrument_to_subtasks(wb, itype, inst_kks, inst_no, inst_desc, status_wdone, today_str)
                         updated_count += 1
                         break
         ok, err = safe_save_workbook(wb, path)
@@ -1436,6 +1446,12 @@ def save_instrument_update(data):
                         if "temuan" in data: row[17].value = data["temuan"]
                         if "tindak_lanjut" in data: row[18].value = data["tindak_lanjut"]
                         if "jumlah_foto" in data: row[19].value = data["jumlah_foto"]
+
+                    is_verif = bool(data.get("verifikasi")) if "verifikasi" in data else bool(data.get("status_wdone", True))
+                    inst_desc = str(row[2].value or '').strip()
+                    inst_kks = str(row[3].value or '').strip()
+                    inst_no = str(row[0].value or '').strip()
+                    sync_instrument_to_subtasks(wb, inst_type, inst_kks, inst_no, inst_desc, is_verif, today_str)
                     break
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
@@ -1685,7 +1701,12 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
         }
 
         if parsed.path in routes:
-            res = routes[parsed.path](body)
+            try:
+                res = routes[parsed.path](body)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                res = {"status": "error", "message": f"Server Error: {str(e)}"}
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
@@ -1695,7 +1716,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-HTML_TEMPLATE = """<!DOCTYPE html>
+HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
