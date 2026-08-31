@@ -889,6 +889,9 @@ def save_add_instrument(data):
     eq = str(data.get("equipment", "")).strip()
     kks = str(data.get("kks", "")).strip()
     area = str(data.get("area", "")).strip() or "GENERAL"
+    sub_area = str(data.get("sub_area", "")).strip()
+    set_point = str(data.get("set_point", "")).strip()
+    contact_type = str(data.get("contact_type", "NO")).strip() or "NO"
     rng = str(data.get("range", "")).strip()
     
     if not eq:
@@ -900,16 +903,20 @@ def save_add_instrument(data):
         sheet_map = {
             "pressure_tx": "Instrument_PressureTX",
             "temperature_tx": "Instrument_TemperatureTX",
-            "pressure_switch": "Instrument_PressureSwitch"
+            "pressure_switch": "Instrument_PressureSwitch",
+            "ptx": "Instrument_PressureTX",
+            "ttx": "Instrument_TemperatureTX",
+            "psw": "Instrument_PressureSwitch"
         }
         sname = sheet_map.get(inst_type)
         if sname and sname in wb.sheetnames:
             ws = wb[sname]
             max_no = ws.max_row
-            if inst_type == "pressure_switch":
-                ws.append([max_no, area, eq, kks, unit, "", rng, "NO", None, None, None, None, None, False, None, None, None, None, None, 0])
+            if inst_type in ["pressure_switch", "psw"]:
+                sp_val = set_point or rng
+                ws.append([max_no, area, eq, kks, unit, sub_area or area, sp_val, contact_type, None, None, None, None, "OK", False, None, None, None, None, None, 0, False])
             else:
-                ws.append([max_no, area, eq, kks, unit, rng, None, False, None, None, None, 0])
+                ws.append([max_no, area, eq, kks, unit, rng or set_point, None, False, None, None, None, 0, False])
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
     return {"status": "success", "message": f"Instrument '{eq}' berhasil ditambahkan!"}
@@ -1082,11 +1089,12 @@ def load_unit_data(unit):
             for r in list(ws.iter_rows(values_only=True))[1:]:
                 if r[2]:
                     is_verif = bool(r[13])
-                    is_calib = bool(r[20]) if len(r) > 20 and r[20] is not None else (clean_val(r[12]) == "OK" or is_verif)
+                    is_calib = bool(r[20]) if len(r) > 20 and r[20] is not None else is_verif
                     psw_list.append({
                         "no": clean_val(r[0]),
                         "area": clean_val(r[1]) or "BOILER",
                         "description": clean_val(r[2]),
+                        "equipment": clean_val(r[2]),
                         "kks": clean_val(r[3]),
                         "unit": r[4] or unit,
                         "sub_area": clean_val(r[5]),
@@ -1720,7 +1728,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Outage EIC Work Order Monitoring System - PLTU MSW</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <script>
@@ -1732,6 +1740,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </script>
     <style>
         :root {
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
             --bg-body: #090d16;
             --bg-card: #131d31;
             --bg-card-hover: #1a2844;
@@ -2009,7 +2021,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         /* Status Badges */
         .status-badge { padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
         .badge-FINISH { background: rgba(16, 185, 129, 0.15); color: var(--status-finish); border: 1px solid rgba(16, 185, 129, 0.3); }
-        .badge-INPROGRESS, .badge-IN_PROGRESS { background: rgba(245, 158, 11, 0.15); color: var(--status-inprog); border: 1px solid rgba(245, 158, 11, 0.3); }
+        .badge-INPROGRESS, .badge-IN_PROGRESS, .badge-IN-PROGRESS { background: rgba(245, 158, 11, 0.15); color: var(--status-inprog); border: 1px solid rgba(245, 158, 11, 0.3); }
         .badge-SCHED-OK, .badge-SCHED_OK { background: rgba(100, 116, 139, 0.15); color: var(--status-sched); border: 1px solid rgba(100, 116, 139, 0.3); }
         .badge-findings { background: rgba(244, 63, 94, 0.15); color: var(--status-alert); border: 1px solid rgba(244, 63, 94, 0.3); }
 
@@ -2163,7 +2175,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         /* Modal Styles */
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); z-index: 9999; display: none; justify-content: center; align-items: center; padding: 20px; }
-        .modal-overlay.open { display: flex; animation: fadeIn 0.2s ease; }
+        .modal-overlay.open, .modal-overlay.active { display: flex !important; animation: fadeIn 0.2s ease; }
         .modal-content { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); width: 100%; max-width: 760px; max-height: 90vh; overflow-y: auto; padding: 24px; box-shadow: var(--shadow-card); position: relative; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 14px; }
         .modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; font-weight: 700; }
@@ -2366,11 +2378,495 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         @media (max-width: 900px) {
-            header { flex-direction: column; gap: 14px; align-items: flex-start; }
-            .header-controls { width: 100%; justify-content: space-between; }
+            header { padding: 12px 20px; }
+            .container { padding: 0 16px; margin: 18px auto; }
+            .dashboard-main-layout { grid-template-columns: 1fr; gap: 16px; }
+            .sidebar-stats { position: static; }
+            .stats-vertical-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
             .outage-banner { flex-direction: column; align-items: flex-start; }
             .outage-progress-box { width: 100%; }
-            .sticky-summary-bar { flex-direction: column; align-items: flex-start; padding: 10px 16px; }
+            .sticky-summary-bar { padding: 10px 18px; }
+        }
+
+        /* 📱 Smartphone Adaptive Styling (6" - 7" Screens & Viewports 360px - 430px) */
+        @media (max-width: 640px) {
+            body {
+                padding-bottom: calc(75px + var(--safe-bottom));
+                font-size: 0.88rem;
+            }
+            .container {
+                padding: 0 10px;
+                margin: 10px auto;
+            }
+
+            /* Compact Mobile Header / App Bar */
+            header {
+                padding: 10px 12px;
+                padding-top: calc(10px + var(--safe-top));
+                display: flex;
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+                position: sticky;
+                top: 0;
+                z-index: 100;
+            }
+            .logo-area {
+                flex-shrink: 0;
+            }
+            .logo-badge {
+                padding: 6px 10px;
+                font-size: 0.78rem;
+                letter-spacing: 0.2px;
+                border-radius: var(--radius-sm);
+            }
+            .title-group {
+                display: none !important; /* Hide long title from top header on mobile to conserve screen space */
+            }
+            .header-controls {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                width: auto;
+                justify-content: flex-end;
+            }
+            .unit-switcher {
+                padding: 2px;
+                border-radius: var(--radius-sm);
+            }
+            .unit-btn {
+                padding: 5px 10px;
+                font-size: 0.76rem;
+            }
+            .theme-toggle-btn {
+                padding: 5px 8px;
+                font-size: 0.88rem;
+                border-radius: var(--radius-sm);
+            }
+            .btn-print {
+                padding: 5px 10px;
+                font-size: 0.76rem;
+                border-radius: var(--radius-sm);
+            }
+
+            /* Outage Banner for Mobile */
+            .outage-banner {
+                padding: 12px 14px;
+                margin-bottom: 12px;
+                border-radius: var(--radius-md);
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+            .outage-info {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 6px;
+                width: 100%;
+            }
+            .outage-title {
+                font-size: 0.95rem;
+                line-height: 1.35;
+            }
+            .outage-progress-box {
+                min-width: 0;
+                width: 100%;
+                gap: 10px;
+            }
+            .outage-pct-huge {
+                font-size: 1.45rem;
+            }
+
+            /* KPI Stats: 2x2 Grid Layout */
+            .dashboard-main-layout {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            .sidebar-stats {
+                position: static;
+                gap: 6px;
+            }
+            .sidebar-section-title {
+                font-size: 0.76rem;
+                padding-bottom: 4px;
+            }
+            .stats-vertical-list {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+            .stat-card {
+                padding: 10px 12px;
+                border-radius: var(--radius-sm);
+            }
+            .stat-title {
+                font-size: 0.68rem;
+                letter-spacing: 0.2px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .stat-value {
+                font-size: 1.25rem;
+                margin: 4px 0 2px 0;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 2px;
+            }
+            .stat-value span:last-child {
+                font-size: 0.72rem !important;
+            }
+            .stat-sub {
+                font-size: 0.65rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            /* Nav Tabs: Touch Scrollable Pills */
+            .nav-tabs {
+                gap: 6px;
+                margin-bottom: 12px;
+                overflow-x: auto;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 2px;
+                border-bottom: 1px solid var(--border-color);
+            }
+            .nav-tabs::-webkit-scrollbar { display: none; }
+            .tab-btn {
+                padding: 8px 14px;
+                font-size: 0.8rem;
+                flex-shrink: 0;
+                gap: 6px;
+            }
+            .tab-count {
+                padding: 1px 6px;
+                font-size: 0.68rem;
+            }
+
+            /* Filter & Control Toolbar */
+            .filter-toolbar {
+                padding: 12px;
+                border-radius: var(--radius-md);
+                margin-bottom: 12px;
+                gap: 8px;
+            }
+            .filter-top-row {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                width: 100%;
+            }
+            .filter-input {
+                width: 100% !important;
+                min-width: 0 !important;
+                font-size: 16px !important; /* Standard 16px prevents iOS Safari auto-zoom */
+                padding: 8px 12px;
+                border-radius: var(--radius-sm);
+            }
+            .view-switcher {
+                width: 100%;
+                margin-left: 0;
+                justify-content: center;
+            }
+            .view-btn {
+                flex: 1;
+                text-align: center;
+                padding: 7px 10px;
+            }
+            .filter-pills {
+                display: flex;
+                flex-wrap: nowrap !important;
+                overflow-x: auto;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+                gap: 6px;
+                padding-bottom: 4px;
+                width: 100%;
+            }
+            .filter-pills::-webkit-scrollbar { display: none; }
+            .pill-btn {
+                flex-shrink: 0;
+                padding: 5px 11px;
+                font-size: 0.74rem;
+            }
+            #side-pagination-counter {
+                width: 100%;
+                margin-left: 0 !important;
+                justify-content: space-between;
+                font-size: 0.74rem;
+                padding: 4px 8px;
+            }
+
+            /* Pagination Bar */
+            .pagination-bar {
+                flex-direction: column;
+                gap: 10px;
+                align-items: center;
+                text-align: center;
+                padding: 10px 12px;
+                font-size: 0.78rem;
+            }
+            .page-btn {
+                padding: 6px 10px;
+                font-size: 0.76rem;
+            }
+
+            /* Work Order, Actuator & Instrument Cards */
+            .item-card {
+                border-radius: var(--radius-sm);
+            }
+            .item-header {
+                padding: 12px 14px;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            .item-title-box {
+                width: 100%;
+            }
+            .item-code {
+                font-size: 0.74rem;
+            }
+            .item-name {
+                font-size: 0.9rem;
+                line-height: 1.35;
+            }
+            .header-actions {
+                width: 100%;
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+                border-top: 1px solid rgba(255,255,255,0.06);
+                padding-top: 8px;
+            }
+            .header-actions span {
+                font-size: 0.76rem !important;
+            }
+            .btn-finding {
+                padding: 4px 10px;
+                font-size: 0.72rem;
+            }
+            .progress-box {
+                min-width: 0;
+                gap: 6px;
+            }
+            .progress-bar-bg {
+                width: 60px;
+                height: 7px;
+            }
+            .item-body {
+                padding: 12px 14px;
+            }
+
+            /* 1-Column Subtask Checklist with Thumb-Friendly Checkbox */
+            .checklist-grid {
+                grid-template-columns: 1fr !important;
+                gap: 8px;
+            }
+            .checklist-item {
+                padding: 10px 12px;
+                min-height: auto;
+                gap: 8px;
+            }
+            .checklist-item-body {
+                gap: 10px;
+                align-items: center;
+            }
+            .checklist-item-body input[type="checkbox"] {
+                width: 22px;
+                height: 22px;
+                min-width: 22px;
+                min-height: 22px;
+                margin-top: 0;
+                cursor: pointer;
+            }
+            .checklist-item-body span {
+                font-size: 0.86rem;
+                line-height: 1.35;
+            }
+            .btn-batch-check, .btn-batch-reset {
+                padding: 4px 8px;
+                font-size: 0.7rem;
+            }
+            .btn-del-subtask-cross {
+                font-size: 1.3rem;
+                padding: 2px 6px;
+                opacity: 0.8;
+            }
+            .subtask-add-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+            .subtask-add-bar input {
+                width: 100%;
+            }
+
+            /* Forms & Textarea inside Cards & Modals */
+            .form-grid {
+                grid-template-columns: 1fr !important;
+                gap: 10px;
+            }
+            .textarea-full {
+                font-size: 16px !important;
+                min-height: 60px;
+            }
+            .calib-grid {
+                grid-template-columns: 1fr !important;
+                gap: 10px;
+                padding: 10px;
+            }
+            .calib-fields {
+                grid-template-columns: 1fr 1fr;
+                gap: 6px;
+            }
+
+            /* Fullscreen Mobile Modal Sheets */
+            .modal-overlay {
+                padding: 0;
+                align-items: flex-end;
+            }
+            .modal-content {
+                width: 100% !important;
+                max-width: 100% !important;
+                height: 100% !important;
+                max-height: 100vh !important;
+                border-radius: 0 !important;
+                padding: 14px !important;
+                padding-top: calc(12px + var(--safe-top)) !important;
+                padding-bottom: calc(14px + var(--safe-bottom)) !important;
+                border: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+            }
+            .modal-header {
+                margin-bottom: 10px;
+                padding-bottom: 8px;
+                flex-shrink: 0;
+            }
+            .modal-header h3 {
+                font-size: 1rem !important;
+            }
+            .modal-close {
+                font-size: 1.8rem;
+                line-height: 1;
+                padding: 2px 8px;
+            }
+            .photo-dropzone {
+                padding: 14px;
+                margin-bottom: 10px;
+            }
+            .photo-grid {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+                margin-bottom: 10px;
+            }
+            .photo-thumb-box {
+                aspect-ratio: 1/1;
+            }
+
+            /* Report Modal Mobile Styles */
+            .report-type-selector {
+                overflow-x: auto;
+                flex-wrap: nowrap !important;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 4px;
+                gap: 6px;
+            }
+            .report-type-selector::-webkit-scrollbar { display: none; }
+            .report-type-selector .unit-btn {
+                flex-shrink: 0;
+                padding: 6px 12px;
+                font-size: 0.74rem;
+            }
+            #report-date-bar {
+                padding: 8px 10px;
+                gap: 8px;
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .report-kpi-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+            .report-table {
+                font-size: 0.74rem;
+            }
+            .report-table th, .report-table td {
+                padding: 6px 8px;
+            }
+
+            /* Sticky Summary Bar: Mobile Bottom Position */
+            .sticky-summary-bar {
+                top: auto;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                padding: 8px 12px;
+                padding-bottom: calc(8px + var(--safe-bottom));
+                border-top: 1px solid var(--border-color);
+                border-bottom: none;
+                transform: translateY(100%);
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+                box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+            }
+            .sticky-summary-bar.visible {
+                transform: translateY(0);
+            }
+            .sticky-stats-group {
+                gap: 4px;
+                overflow-x: auto;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+                flex-wrap: nowrap;
+                max-width: calc(100vw - 115px);
+            }
+            .sticky-stats-group::-webkit-scrollbar { display: none; }
+            .sticky-stat-pill {
+                padding: 3px 7px;
+                font-size: 0.68rem;
+                flex-shrink: 0;
+            }
+            .sticky-actions-group {
+                gap: 4px;
+                flex-shrink: 0;
+            }
+            .sticky-action-btn {
+                padding: 4px 8px;
+                font-size: 0.72rem;
+            }
+
+            /* Floating Back to Top Button */
+            .back-to-top-btn {
+                bottom: calc(56px + var(--safe-bottom));
+                right: 12px;
+                width: 38px;
+                height: 38px;
+                font-size: 0.9rem;
+            }
+
+            /* Toast Notification on Mobile */
+            #toast-container {
+                bottom: calc(60px + var(--safe-bottom));
+                right: 12px;
+                left: 12px;
+                align-items: stretch;
+            }
+            .toast {
+                max-width: 100%;
+                min-width: auto;
+                font-size: 0.8rem;
+                padding: 10px 14px;
+            }
         }
     
         /* Component Badges on Subtask Checklist */
@@ -2472,6 +2968,170 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             background: rgba(244, 63, 94, 0.15);
         }
 
+        /* Pressure Switch Set Point & Contact Styling */
+        .setpoint-cell {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-width: 95px;
+            padding: 3px 8px;
+            background: var(--bg-sub);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .setpoint-val {
+            font-size: 0.84rem;
+            font-weight: 700;
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+            line-height: 1.2;
+        }
+        .setpoint-divider {
+            width: 100%;
+            height: 1px;
+            background: var(--border-color);
+            margin: 2px 0;
+        }
+        .setpoint-dir {
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            font-family: 'Inter', sans-serif;
+            line-height: 1.1;
+        }
+        .setpoint-dir.high {
+            color: #38bdf8;
+        }
+        .setpoint-dir.low {
+            color: #f59e0b;
+        }
+
+        .contact-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.03em;
+            text-align: center;
+            min-width: 40px;
+        }
+        .contact-no {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--status-finish);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+        .contact-nc {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+
+        /* Small In-Place Refresh Button */
+        .btn-refresh-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            background: rgba(99, 102, 241, 0.12);
+            color: var(--primary);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 0.76rem;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+            line-height: 1;
+            font-weight: 600;
+        }
+        .btn-refresh-icon:hover {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+        }
+        .btn-refresh-icon:active {
+            transform: scale(0.96);
+        }
+        .btn-refresh-icon.is-loading {
+            pointer-events: none;
+            opacity: 0.8;
+            cursor: wait;
+        }
+        .btn-refresh-icon .refresh-icon {
+            display: inline-block;
+            font-size: 0.82rem;
+            transform-origin: center center;
+        }
+        .btn-refresh-icon.is-loading .refresh-icon {
+            animation: spin-loading-icon 0.8s linear infinite;
+        }
+        @keyframes spin-loading-icon {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Scope Master Security & Protection Styles */
+        .scope-lock-banner {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 20px;
+            border-radius: var(--radius-md);
+            margin-bottom: 6px;
+            gap: 14px;
+            flex-wrap: wrap;
+            transition: all 0.3s;
+        }
+        .scope-lock-banner.locked {
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.25);
+        }
+        .scope-lock-banner.unlocked {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+        .lock-icon-circle {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .lock-icon-circle.open {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+        .scope-type-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--primary);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-6px); }
+            40%, 80% { transform: translateX(6px); }
+        }
+        .shake-error {
+            animation: shake 0.4s ease-in-out;
+            border-color: #f43f5e !important;
+        }
+
     </style>
 </head>
 <body>
@@ -2512,11 +3172,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </div>
 
             <!-- Upload Dropzone -->
-            <div class="photo-dropzone" id="photo-dropzone" onclick="document.getElementById('file-input-modal').click()">
-                <div style="font-size:1.8rem; margin-bottom:6px;">📸</div>
-                <strong style="color:var(--primary); font-size:0.9rem;">Klik untuk Pilih Foto atau Drag & Drop ke Sini</strong>
-                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Mendukung multi-foto (JPG, PNG, WebP). Foto otomatis disimpan ke folder <code>Finding/</code> & disinkronkan ke Excel.</p>
+            <div class="photo-dropzone" id="photo-dropzone">
+                <div style="font-size:1.8rem; margin-bottom:4px;">📸</div>
+                <strong style="color:var(--primary); font-size:0.9rem;">Unggah Bukti Foto Lapangan</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin:4px 0 10px 0;">Mendukung multi-foto (JPG, PNG, WebP). Otomatis tersimpan ke folder <code>Finding/</code> & disinkronkan ke Excel.</p>
+                <div style="display:flex; justify-content:center; gap:8px; flex-wrap:wrap;">
+                    <button type="button" class="btn-save" style="padding:7px 14px; font-size:0.8rem;" onclick="document.getElementById('camera-input-modal').click()">📷 Kamera Langsung</button>
+                    <button type="button" class="page-btn" style="padding:7px 14px; font-size:0.8rem;" onclick="document.getElementById('file-input-modal').click()">📁 Pilih dari Galeri</button>
+                </div>
                 <input type="file" id="file-input-modal" accept="image/*" multiple style="display:none;" onchange="handleModalFileSelect(this.files)">
+                <input type="file" id="camera-input-modal" accept="image/*" capture="environment" style="display:none;" onchange="handleModalFileSelect(this.files)">
             </div>
 
             <!-- Photo Gallery Grid -->
@@ -2650,6 +3315,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Master EIC Authorization Password Modal -->
+    <div class="modal-overlay" id="master-pwd-modal">
+        <div class="modal-content" style="max-width: 440px; padding: 24px;">
+            <div class="modal-header" style="margin-bottom: 14px;">
+                <div>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+                        🔐 Otorisasi Master EIC
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Masukkan password otorisasi untuk membuka akses edit Master PIC & Scope.</div>
+                </div>
+                <button class="modal-close" onclick="closeMasterPasswordModal()">&times;</button>
+            </div>
+            
+            <form onsubmit="submitMasterPassword(event)" style="margin-top: 10px;">
+                <div class="form-group" style="margin-bottom: 14px;">
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Password Master:</label>
+                    <div style="position:relative; display:flex; align-items:center;">
+                        <input type="password" id="master-pwd-input" class="filter-input" placeholder="Masukkan password master..." style="width:100%; padding:10px 38px 10px 12px; font-size:0.95rem; font-family:'Inter', sans-serif;" autocomplete="current-password">
+                        <button type="button" onclick="toggleMasterPwdVisibility()" style="position:absolute; right:10px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1rem;" title="Lihat / Sembunyikan Password">👁️</button>
+                    </div>
+                    <div id="master-pwd-error" style="color:#f43f5e; font-size:0.78rem; font-weight:700; margin-top:6px; display:none;">❌ Password salah! Silakan coba lagi.</div>
+                </div>
+                
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
+                    <button type="button" class="page-btn" onclick="closeMasterPasswordModal()">Batal</button>
+                    <button type="submit" class="btn-save" style="padding:9px 20px;">🔓 Buka Akses Edit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Header -->
     <header>
         <div class="logo-area">
@@ -2763,13 +3459,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             <button class="pill-btn" id="pill-inprog" onclick="setQuickFilter('inprog')">⏳ In Progress</button>
                             <button class="pill-btn" id="pill-finish" onclick="setQuickFilter('finish')">☑️ Selesai</button>
                         </div>
-                        <div id="side-pagination-counter" style="margin-left:auto; display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:600; color:var(--text-muted); background:var(--bg-sub); padding:4px 12px; border-radius:20px; border:1px solid var(--border-color);">
+                        <div id="side-pagination-counter" style="margin-left:auto; display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:600; color:var(--text-muted); background:var(--bg-sub); padding:4px 10px; border-radius:20px; border:1px solid var(--border-color);">
                             <span>Menampilkan <strong style="color:var(--primary);" id="side-item-range">0 - 0</strong> dari <strong style="color:var(--text-main);" id="side-item-total">0</strong> item</span>
-                            <select id="side-page-size-select" class="filter-input" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; margin-left:4px;" onchange="changePageSize(this.value)">
+                            <select id="side-page-size-select" class="filter-input" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; margin-left:2px;" onchange="changePageSize(this.value)">
                                 <option value="20" selected>20 / hal</option>
                                 <option value="40">40 / hal</option>
                                 <option value="99999">Semua</option>
                             </select>
+                            <button class="btn-refresh-icon" onclick="refreshDataSilently()" title="Perbarui Data Terbaru (In-place refresh tanpa reload halaman)">
+                                <span class="refresh-icon">🔄</span><span class="refresh-text">Refresh</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -2795,6 +3494,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         let pageSize = 20;
         let editModeState = {};
         let activeFinding = null;
+        let isScopeMasterUnlocked = sessionStorage.getItem('eic_scope_unlocked') === 'true';
+        const MASTER_PASSWORDS = ['eic123', 'admin123', 'msweic', '123456', 'eic2026'];
 
         // Date Helpers for Calendar Pickers
         function formatDateForInput(dateVal) {
@@ -2873,6 +3574,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div style="margin-top:8px; font-size:0.88rem; color:var(--text-main);">Detail Kendala: ${e.message}</div>
                     <div style="margin-top:12px; font-size:0.82rem; color:var(--text-muted);">Tips: Pastikan server.exe atau start_app.bat sedang berjalan dan file Excel <code>Template_Outage_EIC_Monitoring_unit ${currentUnit}.xlsx</code> berada di folder yang sama.</div>
                 </div>`;
+            }
+        }
+
+        async function refreshDataSilently() {
+            const btns = document.querySelectorAll('.btn-refresh-icon');
+            btns.forEach(b => {
+                b.classList.add('is-loading');
+                const txt = b.querySelector('.refresh-text');
+                if(txt) txt.innerText = 'Memuat...';
+            });
+            try {
+                await loadData();
+                showToast('✓ Data berhasil diperbarui!', 'info');
+            } catch(e) {
+                showToast('Gagal memuat data terbaru: ' + e.message, 'error');
+            } finally {
+                btns.forEach(b => {
+                    b.classList.remove('is-loading');
+                    const txt = b.querySelector('.refresh-text');
+                    if(txt) txt.innerText = 'Refresh';
+                });
             }
         }
 
@@ -3011,7 +3733,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             return `
             <div class="pagination-bar" style="margin-top:20px;">
-                <div>Menampilkan <strong>${totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, totalItems)}</strong> dari <strong>${totalItems}</strong> item</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span>Menampilkan <strong>${totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, totalItems)}</strong> dari <strong>${totalItems}</strong> item</span>
+                    <button class="btn-refresh-icon" onclick="refreshDataSilently()" title="Perbarui Data Terbaru (In-place refresh tanpa reload halaman)" style="padding:2px 6px; font-size:0.74rem;">
+                        <span class="refresh-icon">🔄</span><span class="refresh-text">Refresh</span>
+                    </button>
+                </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <button class="page-btn" onclick="changePage(1)" ${currentPage===1?'disabled':''}>⏮️ Awal</button>
                     <button class="page-btn" onclick="changePage(${currentPage-1})" ${currentPage===1?'disabled':''}>◀️ Prev</button>
@@ -3524,6 +4251,51 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             renderTabContent();
         }
 
+        function getSetPointDetails(item) {
+            let rawSp = String(item.set_point || item.range || '').trim();
+            let dir = '';
+            
+            // Check if explicit direction tag exists in rawSp (e.g. "8 Bar (HIGH)", "2.5 Kg/Cm2 (LOW)", "12.0 kg/cm2 HIGH")
+            if(/\bHIGH\b/i.test(rawSp) || /\bHI\b/i.test(rawSp)) {
+                dir = 'HIGH';
+                rawSp = rawSp.replace(/\s*\(\s*HIGH\s*\)/i, '').replace(/\s*\bHIGH\b/i, '').trim();
+            } else if(/\bLOW\b/i.test(rawSp) || /\bLO\b/i.test(rawSp)) {
+                dir = 'LOW';
+                rawSp = rawSp.replace(/\s*\(\s*LOW\s*\)/i, '').replace(/\s*\bLOW\b/i, '').trim();
+            } else {
+                // Infer from description / name if available
+                const desc = (item.description || item.equipment || '').toUpperCase();
+                if(desc.includes('HIGH TRIP') || desc.includes('PRESSURE OK') || desc.includes('PERMISSIVE') || desc.includes('ACRROS') || desc.includes('DP SWITCH') || desc.includes('BEFORE MTV')) {
+                    dir = 'HIGH';
+                } else if(desc.includes('LOW TRIP') || desc.includes('PRESSURE LOW') || desc.includes('LOW ALARM') || desc.includes('STANDBY PUMP') || desc.includes('INKET PRESSURE LOW') || desc.includes('INLET PRESSURE LOW')) {
+                    dir = 'LOW';
+                } else if((item.contact_type || '').toUpperCase() === 'NC') {
+                    dir = 'LOW';
+                } else {
+                    dir = 'HIGH';
+                }
+            }
+            return {
+                value: rawSp || '-',
+                dir: dir || 'HIGH'
+            };
+        }
+
+        function updateAddInstFormFields(type) {
+            const isPsw = type === 'pressure_switch' || type === 'psw';
+            const subAreaGroup = document.getElementById('group-inst-subarea');
+            const rangeGroup = document.getElementById('group-inst-range');
+            const spGroup = document.getElementById('group-inst-sp');
+            const dirGroup = document.getElementById('group-inst-dir');
+            const contactGroup = document.getElementById('group-inst-contact');
+            
+            if(subAreaGroup) subAreaGroup.style.display = isPsw ? 'flex' : 'none';
+            if(rangeGroup) rangeGroup.style.display = isPsw ? 'none' : 'flex';
+            if(spGroup) spGroup.style.display = isPsw ? 'flex' : 'none';
+            if(dirGroup) dirGroup.style.display = isPsw ? 'flex' : 'none';
+            if(contactGroup) contactGroup.style.display = isPsw ? 'flex' : 'none';
+        }
+
         function renderInstruments(container) {
             const searchStr = document.getElementById('search-input').value.toLowerCase();
             const statusFilter = document.getElementById('filter-status').value;
@@ -3538,7 +4310,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const title = (itm.equipment || itm.description || '').toLowerCase();
                 const kks = (itm.kks || '').toLowerCase();
                 const area = (itm.area || '').toLowerCase();
-                const matchSearch = !searchStr || title.includes(searchStr) || kks.includes(searchStr) || area.includes(searchStr);
+                const subArea = (itm.sub_area || '').toLowerCase();
+                const setPoint = (itm.set_point || itm.range || '').toLowerCase();
+                const matchSearch = !searchStr || title.includes(searchStr) || kks.includes(searchStr) || area.includes(searchStr) || subArea.includes(searchStr) || setPoint.includes(searchStr);
                 const matchArea = !areaFilter || itm.area === areaFilter;
                 
                 let matchStatus = true;
@@ -3564,7 +4338,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div class="form-grid">
                         <div class="form-group">
                             <label>Tipe Instrument <span style="color:#f43f5e;">*</span></label>
-                            <select id="new-inst-type" class="filter-input">
+                            <select id="new-inst-type" class="filter-input" onchange="updateAddInstFormFields(this.value)">
                                 <option value="pressure_tx" ${instSubtab==='ptx'?'selected':''}>Pressure Transmitter (PTX)</option>
                                 <option value="temperature_tx" ${instSubtab==='ttx'?'selected':''}>Temperature Transmitter (TTX)</option>
                                 <option value="pressure_switch" ${instSubtab==='psw'?'selected':''}>Pressure Switch (PSW)</option>
@@ -3572,19 +4346,41 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         </div>
                         <div class="form-group">
                             <label>Nama Equipment / Description <span style="color:#f43f5e;">*</span></label>
-                            <input type="text" id="new-inst-desc" class="filter-input" placeholder="INLET ID FAN 1...">
+                            <input type="text" id="new-inst-desc" class="filter-input" placeholder="LDO PRESSURE BEFORE MTV, INLET ID FAN 1...">
                         </div>
                         <div class="form-group">
                             <label>Tag KKS</label>
-                            <input type="text" id="new-inst-kks" class="filter-input" placeholder="10HNA61CP001">
+                            <input type="text" id="new-inst-kks" class="filter-input" placeholder="10HJF11CP301 / 10HNA61CP001">
                         </div>
                         <div class="form-group">
                             <label>Area System</label>
-                            <input type="text" id="new-inst-area" class="filter-input" placeholder="ESP #2, Boiler#2...">
+                            <input type="text" id="new-inst-area" class="filter-input" placeholder="BOILER, ESP, TURBINE...">
                         </div>
-                        <div class="form-group">
-                            <label>Range / Set Point</label>
-                            <input type="text" id="new-inst-range" class="filter-input" placeholder="-70 - 70 mbar / 8 Bar">
+                        <div class="form-group" id="group-inst-subarea" style="${instSubtab==='psw'?'':'display:none;'}">
+                            <label>Sub-Area / System (mis. SUB 1, Lower Burner, Pri Fan 1)</label>
+                            <input type="text" id="new-inst-subarea" class="filter-input" placeholder="SUB 1, Lower Burner, Pri Fan 1, BFP 1...">
+                        </div>
+                        <div class="form-group" id="group-inst-range" style="${instSubtab==='psw'?'display:none;':''}">
+                            <label>Range Transmitter</label>
+                            <input type="text" id="new-inst-range" class="filter-input" placeholder="-70 - 70 mbar / 0 - 100 kPa">
+                        </div>
+                        <div class="form-group" id="group-inst-sp" style="${instSubtab==='psw'?'':'display:none;'}">
+                            <label>Set Point Nilai</label>
+                            <input type="text" id="new-inst-sp-val" class="filter-input" placeholder="mis. 8 Bar, 2.5 Kg/Cm2, 0.4 Kg/Cm2">
+                        </div>
+                        <div class="form-group" id="group-inst-dir" style="${instSubtab==='psw'?'':'display:none;'}">
+                            <label>Arah Set Point</label>
+                            <select id="new-inst-sp-dir" class="filter-input">
+                                <option value="HIGH">HIGH</option>
+                                <option value="LOW">LOW</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="group-inst-contact" style="${instSubtab==='psw'?'':'display:none;'}">
+                            <label>Tipe Kontak (NO / NC)</label>
+                            <select id="new-inst-contact" class="filter-input">
+                                <option value="NO">NO (Normally Open)</option>
+                                <option value="NC">NC (Normally Closed)</option>
+                            </select>
                         </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
@@ -3622,18 +4418,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     const cardPrefix = instSubtab === 'psw' ? 'psw' : 'inst';
                     const bodyId = getCardBodyId(cardPrefix, item.kks || item.no || idx);
                     const isOpen = openCardIds.has(bodyId);
+                    const sp = instSubtab === 'psw' ? getSetPointDetails(item) : null;
+                    const contact = (item.contact_type || 'NO').toUpperCase();
 
                     html += `
                     <div class="item-card">
                         <div class="item-header" onclick="toggleAccordion('${bodyId}')">
                             <div style="display:flex; align-items:center; gap:12px; flex-grow:1;">
                                 <div class="item-title-box">
-                                    <div class="item-code">${item.kks || 'No Tag'} &bull; ${item.area} ${item.tanggal ? '&bull; 🏁 Selesai: ' + item.tanggal : ''}</div>
+                                    <div class="item-code" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                        <span style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || 'No Tag'}</span>
+                                        <span>&bull; ${instSubtab === 'psw' ? (item.sub_area || item.area) : item.area}</span>
+                                        ${(item.finish_date || item.dated || item.tanggal) ? '<span>&bull; 🏁 Selesai: ' + (item.finish_date || item.dated || item.tanggal) + '</span>' : ''}
+                                        ${instSubtab === 'psw' ? `
+                                            <div class="setpoint-cell" style="padding:1px 6px; min-width:auto; margin-left:2px;">
+                                                <span class="setpoint-val" style="font-size:0.75rem;">${sp.value}</span>
+                                                <div class="setpoint-divider"></div>
+                                                <span class="setpoint-dir ${sp.dir.toLowerCase()}" style="font-size:0.62rem;">${sp.dir}</span>
+                                            </div>
+                                            <span class="contact-badge ${contact==='NC'?'contact-nc':'contact-no'}" style="padding:1px 7px; font-size:0.72rem; min-width:auto;">${contact}</span>
+                                        ` : ''}
+                                    </div>
                                     <div class="item-name">${title} ${instSubtab!=='psw' && item.range ? ' (Range: ' + item.range + ')' : ''}</div>
                                 </div>
                             </div>
                             <div class="header-actions">
-                                <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='ptx'?'pressure_tx':'temperature_tx'}')">
+                                <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
                                     📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Temuan' : '+ Temuan')}
                                 </button>
                                 <span class="status-badge ${isVerif ? 'badge-FINISH' : (isCalib ? 'badge-IN-PROGRESS' : 'badge-SCHED-OK')}" id="badge-${cardPrefix}-${idx}">${isVerif ? 'DONE (100%)' : (isCalib ? 'IN PROGRESS (Kalibrasi OK)' : 'SCHEDULED')}</span>
@@ -3658,6 +4468,30 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
                             ${instSubtab === 'psw' ? `
+                            <div class="form-grid" style="margin-bottom:14px; background:var(--bg-sub); padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+                                <div class="form-group">
+                                    <label>Sub-Area / System</label>
+                                    <input type="text" id="subarea-psw-${idx}" class="filter-input" value="${item.sub_area || item.area || ''}" placeholder="SUB 1, Lower Burner, Pri Fan 1...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Set Point (Nilai)</label>
+                                    <input type="text" id="sp-val-psw-${idx}" class="filter-input" value="${sp.value}" placeholder="mis. 8 Bar, 2.5 Kg/Cm2">
+                                </div>
+                                <div class="form-group">
+                                    <label>Arah Set Point</label>
+                                    <select id="sp-dir-psw-${idx}" class="filter-input">
+                                        <option value="HIGH" ${sp.dir==='HIGH'?'selected':''}>HIGH</option>
+                                        <option value="LOW" ${sp.dir==='LOW'?'selected':''}>LOW</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Tipe Kontak (NO / NC)</label>
+                                    <select id="contact-psw-${idx}" class="filter-input">
+                                        <option value="NO" ${contact==='NO'?'selected':''}>NO (Normally Open)</option>
+                                        <option value="NC" ${contact==='NC'?'selected':''}>NC (Normally Closed)</option>
+                                    </select>
+                                </div>
+                            </div>
                             <div class="calib-grid">
                                 <div class="calib-col">
                                     <h5>📥 AS FOUND (Kondisi Awal)</h5>
@@ -3713,52 +4547,114 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 html += '</div>';
             } else {
-                html += `
-                <div class="table-wrap">
-                    <table class="dense-table">
-                        <thead>
-                            <tr>
-                                <th>Tag KKS</th>
-                                <th>Equipment Description</th>
-                                <th>Area</th>
-                                <th>Range / Satuan</th>
-                                <th style="text-align:center;">🛠️ Kalibrasi</th>
-                                <th style="text-align:center;">🔍 Verifikasi</th>
-                                <th>Status Finish</th>
-                                <th>Temuan & Foto</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${pageItems.map((item, idx) => {
-                                const title = (instSubtab==='psw' ? item.description : item.equipment) || `Item #${item.no}`;
-                                const isVerif = !!item.verifikasi;
-                                const isCalib = !!item.kalibrasi;
-                                const hasFindings = !!item.temuan || (item.jumlah_foto > 0);
-                                return `
+                if(instSubtab === 'psw') {
+                    html += `
+                    <div class="table-wrap">
+                        <table class="dense-table">
+                            <thead>
                                 <tr>
-                                    <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || '-'}</td>
-                                    <td style="font-weight:600;">${title}</td>
-                                    <td><span style="font-size:0.8rem; color:var(--text-muted);">${item.area}</span></td>
-                                    <td><span style="font-size:0.82rem; font-family:'JetBrains Mono';">${item.range || '-'}</span></td>
-                                    <td style="text-align:center;">
-                                        <input type="checkbox" ${isCalib?'checked':''} onchange="toggleDirectInstCheck('${instSubtab}', '${item.kks || item.no}', 'kalibrasi', this.checked)" style="width:18px; height:18px; accent-color:var(--primary); cursor:pointer;">
-                                    </td>
-                                    <td style="text-align:center;">
-                                        <input type="checkbox" ${isVerif?'checked':''} onchange="toggleDirectInstCheck('${instSubtab}', '${item.kks || item.no}', 'verifikasi', this.checked)" style="width:18px; height:18px; accent-color:var(--status-finish); cursor:pointer;">
-                                    </td>
-                                    <td>
-                                        <span class="status-badge ${isVerif?'badge-FINISH':(isCalib?'badge-IN-PROGRESS':'badge-SCHED-OK')}">${isVerif?'DONE (100%)':(isCalib?'IN PROGRESS':'SCHEDULED')}</span>
-                                    </td>
-                                    <td>
-                                        <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='ptx'?'pressure_tx':'temperature_tx'}')">
-                                            📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
-                                        </button>
-                                    </td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>`;
+                                    <th>Tag KKS</th>
+                                    <th>Equipment Description</th>
+                                    <th>Area / Sub-Area</th>
+                                    <th style="text-align:center;">Set Point</th>
+                                    <th style="text-align:center;">Contact (NO/NC)</th>
+                                    <th style="text-align:center;">🛠️ Kalibrasi</th>
+                                    <th style="text-align:center;">🔍 Verifikasi</th>
+                                    <th>Status Finish</th>
+                                    <th>Temuan & Foto</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${pageItems.map((item, idx) => {
+                                    const title = item.description || item.equipment || `Item #${item.no}`;
+                                    const isVerif = !!item.verifikasi;
+                                    const isCalib = !!item.kalibrasi;
+                                    const hasFindings = !!item.temuan || (item.jumlah_foto > 0);
+                                    const sp = getSetPointDetails(item);
+                                    const contact = (item.contact_type || 'NO').toUpperCase();
+                                    const areaDisplay = item.sub_area ? `${item.sub_area} <span style="color:var(--text-muted); font-size:0.75rem;">(${item.area || 'BOILER'})</span>` : (item.area || '-');
+                                    return `
+                                    <tr>
+                                        <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || '-'}</td>
+                                        <td style="font-weight:600;">${title}</td>
+                                        <td><span style="font-size:0.82rem; font-weight:600; color:var(--text-main);">${areaDisplay}</span></td>
+                                        <td style="text-align:center;">
+                                            <div class="setpoint-cell">
+                                                <span class="setpoint-val">${sp.value}</span>
+                                                <div class="setpoint-divider"></div>
+                                                <span class="setpoint-dir ${sp.dir.toLowerCase()}">${sp.dir}</span>
+                                            </div>
+                                        </td>
+                                        <td style="text-align:center;">
+                                            <span class="contact-badge ${contact==='NC'?'contact-nc':'contact-no'}">${contact}</span>
+                                        </td>
+                                        <td style="text-align:center;">
+                                            <input type="checkbox" ${isCalib?'checked':''} onchange="toggleDirectInstCheck('psw', '${item.kks || item.no}', 'kalibrasi', this.checked)" style="width:18px; height:18px; accent-color:var(--primary); cursor:pointer;">
+                                        </td>
+                                        <td style="text-align:center;">
+                                            <input type="checkbox" ${isVerif?'checked':''} onchange="toggleDirectInstCheck('psw', '${item.kks || item.no}', 'verifikasi', this.checked)" style="width:18px; height:18px; accent-color:var(--status-finish); cursor:pointer;">
+                                        </td>
+                                        <td>
+                                            <span class="status-badge ${isVerif?'badge-FINISH':(isCalib?'badge-IN-PROGRESS':'badge-SCHED-OK')}">${isVerif?'DONE (100%)':(isCalib?'IN PROGRESS':'SCHEDULED')}</span>
+                                        </td>
+                                        <td>
+                                            <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', 'pressure_switch')">
+                                                📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
+                                            </button>
+                                        </td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+                } else {
+                    html += `
+                    <div class="table-wrap">
+                        <table class="dense-table">
+                            <thead>
+                                <tr>
+                                    <th>Tag KKS</th>
+                                    <th>Equipment Description</th>
+                                    <th>Area</th>
+                                    <th>Range / Satuan</th>
+                                    <th style="text-align:center;">🛠️ Kalibrasi</th>
+                                    <th style="text-align:center;">🔍 Verifikasi</th>
+                                    <th>Status Finish</th>
+                                    <th>Temuan & Foto</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${pageItems.map((item, idx) => {
+                                    const title = item.equipment || `Item #${item.no}`;
+                                    const isVerif = !!item.verifikasi;
+                                    const isCalib = !!item.kalibrasi;
+                                    const hasFindings = !!item.temuan || (item.jumlah_foto > 0);
+                                    return `
+                                    <tr>
+                                        <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || '-'}</td>
+                                        <td style="font-weight:600;">${title}</td>
+                                        <td><span style="font-size:0.8rem; color:var(--text-muted);">${item.area}</span></td>
+                                        <td><span style="font-size:0.82rem; font-family:'JetBrains Mono';">${item.range || '-'}</span></td>
+                                        <td style="text-align:center;">
+                                            <input type="checkbox" ${isCalib?'checked':''} onchange="toggleDirectInstCheck('${instSubtab}', '${item.kks || item.no}', 'kalibrasi', this.checked)" style="width:18px; height:18px; accent-color:var(--primary); cursor:pointer;">
+                                        </td>
+                                        <td style="text-align:center;">
+                                            <input type="checkbox" ${isVerif?'checked':''} onchange="toggleDirectInstCheck('${instSubtab}', '${item.kks || item.no}', 'verifikasi', this.checked)" style="width:18px; height:18px; accent-color:var(--status-finish); cursor:pointer;">
+                                        </td>
+                                        <td>
+                                            <span class="status-badge ${isVerif?'badge-FINISH':(isCalib?'badge-IN-PROGRESS':'badge-SCHED-OK')}">${isVerif?'DONE (100%)':(isCalib?'IN PROGRESS':'SCHEDULED')}</span>
+                                        </td>
+                                        <td>
+                                            <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='ptx'?'pressure_tx':'temperature_tx'}')">
+                                                📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
+                                            </button>
+                                        </td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+                }
             }
 
             html += renderPaginationControls(filteredItems.length);
@@ -3768,68 +4664,101 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         /* ---------------- SCOPE & PIC MASTER RENDERING ---------------- */
         function renderScopeMaster(container) {
             let html = `
-            <div style="display:flex; flex-direction:column; gap:20px;">
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <!-- Master Protection & Security Status Banner -->
+                <div class="scope-lock-banner ${isScopeMasterUnlocked ? 'unlocked' : 'locked'}">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <div class="lock-icon-circle ${isScopeMasterUnlocked ? 'open' : ''}">${isScopeMasterUnlocked ? '🔓' : '🔒'}</div>
+                        <div>
+                            <div style="font-size:0.94rem; font-weight:800; color:${isScopeMasterUnlocked ? '#10b981' : 'var(--text-main)'};">
+                                ${isScopeMasterUnlocked ? 'Mode Edit Master Terbuka (Full Access)' : 'Mode Proteksi Master EIC'}
+                            </div>
+                            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
+                                ${isScopeMasterUnlocked ? 'Anda dapat menambah, mengubah, dan menghapus data Master PIC serta Scope Pekerjaan Outage.' : 'Data Master PIC dan Master Scope diproteksi. Masukkan password untuk membuka mode edit.'}
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        ${isScopeMasterUnlocked ? `
+                            <button class="page-btn" style="padding:7px 16px; font-size:0.82rem; color:#f43f5e; border-color:rgba(244,63,94,0.4); font-weight:700;" onclick="lockMasterScope()" title="Kunci kembali akses edit">
+                                🔒 Kunci Kembali
+                            </button>
+                        ` : `
+                            <button class="btn-save" style="padding:8px 18px; font-size:0.84rem; background:linear-gradient(135deg, #6366f1, #4f46e5); box-shadow:0 4px 12px rgba(99,102,241,0.3);" onclick="openMasterPasswordModal()" title="Buka password untuk edit data master">
+                                🔓 Buka Kunci Edit
+                            </button>
+                        `}
+                    </div>
+                </div>
+
                 <!-- Master PIC Card -->
                 <div style="background:var(--bg-card); border-radius:var(--radius-lg); padding:22px; border:1px solid var(--border-color);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:8px;">
+                    <div style="margin-bottom:8px;">
                         <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0;">👥 Master PIC Tim EIC</h3>
-                        <button class="btn-print" style="padding:7px 16px; font-size:0.85rem; font-weight:700; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:var(--primary); cursor:pointer; border-radius:var(--radius-md);" onclick="openReportModal()" title="Buka Pusat Laporan & Cetak PDF">📑 Menu Laporan & Cetak PDF</button>
                     </div>
                     <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:16px;">Daftar nama penanggung jawab EIC. Semua pilihan dropdown PIC di Work Order, Actuator, & Instrumen tersinkron otomatis dari daftar master ini.</p>
                     
-                    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px;">
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:${isScopeMasterUnlocked ? '18px' : '4px'};">
                         ${(fullData.pics || []).map(p => `
                             <span style="padding:6px 14px; background:var(--bg-sub); border:1px solid var(--border-color); border-radius:20px; font-size:0.85rem; font-weight:600; color:var(--text-main); display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 5px rgba(0,0,0,0.05);">
                                 👤 ${p}
-                                <button style="background:none; border:none; color:#f43f5e; cursor:pointer; font-weight:700; font-size:0.85rem;" title="Hapus PIC" onclick="deletePic('${(p||'').toString().replace(/'/g, "\\'")}')">✖</button>
+                                ${isScopeMasterUnlocked ? `
+                                    <button style="background:none; border:none; color:#f43f5e; cursor:pointer; font-weight:700; font-size:0.85rem; padding:0 2px;" title="Hapus PIC" onclick="deletePic('${(p||'').toString().replace(/'/g, "\\'")}')">✖</button>
+                                ` : ''}
                             </span>
                         `).join('')}
                     </div>
 
-                    <div style="display:flex; gap:10px; max-width:480px;">
-                        <input type="text" id="new-pic-input" class="filter-input" placeholder="Masukkan nama personil / vendor PIC baru..." style="flex-grow:1;">
-                        <button class="btn-save" onclick="addNewPic()">➕ Tambah PIC</button>
-                    </div>
+                    ${isScopeMasterUnlocked ? `
+                        <div style="display:flex; gap:10px; max-width:480px;">
+                            <input type="text" id="new-pic-input" class="filter-input" placeholder="Masukkan nama personil / vendor PIC baru..." style="flex-grow:1;">
+                            <button class="btn-save" onclick="addNewPic()">➕ Tambah PIC</button>
+                        </div>
+                    ` : ''}
                 </div>
 
                 <!-- Scope Master Table -->
                 <div style="background:var(--bg-card); border-radius:var(--radius-lg); padding:22px; border:1px solid var(--border-color);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                        <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800;">📋 Master Scope Pekerjaan Outage (Vendor & MSW Scope)</h3>
-                        <button class="page-btn" style="font-size:0.82rem;" onclick="toggleAccordion('add-scope-form')">${openCardIds.has('add-scope-form') ? '▲ Tutup Scope' : '➕ Tambah Scope'}</button>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+                        <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0;">📋 Master Scope Pekerjaan Outage (Vendor & MSW Scope)</h3>
+                        ${isScopeMasterUnlocked ? `
+                            <button class="page-btn" style="font-size:0.82rem; font-weight:700;" onclick="toggleAccordion('add-scope-form')">${openCardIds.has('add-scope-form') ? '▲ Tutup Scope' : '➕ Tambah Scope'}</button>
+                        ` : ''}
                     </div>
                     
-                    <div id="add-scope-form" class="accordion-form ${openCardIds.has('add-scope-form') ? 'open' : ''}" style="${openCardIds.has('add-scope-form') ? 'display:block;' : ''}; margin-bottom:18px;">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label>Kategori Scope</label>
-                                <input type="text" id="new-scope-cat" class="filter-input" placeholder="BOILER, TURBINE...">
+                    ${isScopeMasterUnlocked ? `
+                        <div id="add-scope-form" class="accordion-form ${openCardIds.has('add-scope-form') ? 'open' : ''}" style="${openCardIds.has('add-scope-form') ? 'display:block;' : ''}; margin-bottom:18px;">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Kategori Scope</label>
+                                    <input type="text" id="new-scope-cat" class="filter-input" placeholder="BOILER, TURBINE...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Equipment / Scope Pekerjaan <span style="color:#f43f5e;">*</span></label>
+                                    <input type="text" id="new-scope-eq" class="filter-input" placeholder="Inspeksi Burner...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Tipe Scope</label>
+                                    <select id="new-scope-type" class="filter-input">
+                                        <option value="MSW">MSW</option>
+                                        <option value="Vendor">Vendor</option>
+                                        <option value="Internal">Internal</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>PIC Penanggung Jawab</label>
+                                    <select id="new-scope-pic" class="filter-input">
+                                        <option value="">Pilih PIC...</option>
+                                        ${(fullData.pics || []).map(p => `<option value="${p}">${p}</option>`).join('')}
+                                    </select>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label>Equipment / Scope Pekerjaan <span style="color:#f43f5e;">*</span></label>
-                                <input type="text" id="new-scope-eq" class="filter-input" placeholder="Inspeksi Burner...">
-                            </div>
-                            <div class="form-group">
-                                <label>Tipe Scope</label>
-                                <select id="new-scope-type" class="filter-input">
-                                    <option value="MSW">MSW</option>
-                                    <option value="Vendor">Vendor</option>
-                                    <option value="Internal">Internal</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>PIC Penanggung Jawab</label>
-                                <select id="new-scope-pic" class="filter-input">
-                                    <option value="">Pilih PIC...</option>
-                                    ${(fullData.pics || []).map(p => `<option value="${p}">${p}</option>`).join('')}
-                                </select>
+                            <div style="display:flex; gap:10px; margin-top:12px;">
+                                <button class="btn-save" onclick="saveNewScope()">💾 Simpan Scope Baru</button>
+                                <button class="page-btn" onclick="toggleAccordion('add-scope-form')">Batal</button>
                             </div>
                         </div>
-                        <div style="display:flex; gap:10px; margin-top:12px;">
-                            <button class="btn-save" onclick="saveNewScope()">💾 Simpan Scope Baru</button>
-                            <button class="page-btn" onclick="toggleAccordion('add-scope-form')">Batal</button>
-                        </div>
-                    </div>
+                    ` : ''}
 
                     <div class="table-wrap">
                         <table class="dense-table">
@@ -3839,38 +4768,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <th>Equipment / Scope Pekerjaan</th>
                                     <th>Tipe Scope</th>
                                     <th>PIC Penanggung Jawab</th>
-                                    <th>Aksi</th>
+                                    ${isScopeMasterUnlocked ? '<th>Aksi</th>' : ''}
                                 </tr>
                             </thead>
                             <tbody>
                                 ${(fullData.scope_master || []).map((s, sIdx) => `
                                     <tr>
-                                        <td style="font-size:0.8rem; color:var(--text-muted);">${s.kategori || '-'}</td>
+                                        <td style="font-size:0.8rem; color:var(--text-muted); font-weight:600;">${s.kategori || '-'}</td>
                                         <td>
-                                            <input type="text" id="scope-eq-${sIdx}" class="filter-input" value="${(s.nama_equipment || '').replace(/"/g, '&quot;')}" style="padding:5px 8px; font-size:0.85rem; width:100%; min-width:200px;" onblur="saveScopeRow(${sIdx})">
+                                            ${isScopeMasterUnlocked ? `
+                                                <input type="text" id="scope-eq-${sIdx}" class="filter-input" value="${(s.nama_equipment || '').replace(/"/g, '&quot;')}" style="padding:5px 8px; font-size:0.85rem; width:100%; min-width:200px;" onblur="saveScopeRow(${sIdx})">
+                                            ` : `
+                                                <div style="font-weight:600; font-size:0.88rem; color:var(--text-main);">${s.nama_equipment || '-'}</div>
+                                            `}
                                         </td>
                                         <td>
-                                            <select id="scope-type-${sIdx}" class="filter-input" style="padding:5px 8px; font-size:0.85rem;" onchange="saveScopeRow(${sIdx})">
-                                                <option value="Vendor" ${s.tipe_scope==='Vendor'?'selected':''}>Vendor</option>
-                                                <option value="MSW" ${s.tipe_scope==='MSW'?'selected':''}>MSW</option>
-                                                <option value="Internal" ${s.tipe_scope==='Internal'?'selected':''}>Internal</option>
-                                            </select>
+                                            ${isScopeMasterUnlocked ? `
+                                                <select id="scope-type-${sIdx}" class="filter-input" style="padding:5px 8px; font-size:0.85rem;" onchange="saveScopeRow(${sIdx})">
+                                                    <option value="Vendor" ${s.tipe_scope==='Vendor'?'selected':''}>Vendor</option>
+                                                    <option value="MSW" ${s.tipe_scope==='MSW'?'selected':''}>MSW</option>
+                                                    <option value="Internal" ${s.tipe_scope==='Internal'?'selected':''}>Internal</option>
+                                                </select>
+                                            ` : `
+                                                <span class="scope-type-badge">${s.tipe_scope || 'MSW'}</span>
+                                            `}
                                         </td>
                                         <td>
-                                            <select id="scope-pic-${sIdx}" class="filter-input" style="padding:5px 8px; font-size:0.85rem;" onchange="saveScopeRow(${sIdx})">
-                                                <option value="">Pilih PIC...</option>
-                                                ${(fullData.pics || []).map(p => {
-                                                    const isSel = (s.pic === p || (s.pic||'').toUpperCase() === (p||'').toUpperCase());
-                                                    return `<option value="${p}" ${isSel ? 'selected' : ''}>${p}</option>`;
-                                                }).join('')}
-                                            </select>
+                                            ${isScopeMasterUnlocked ? `
+                                                <select id="scope-pic-${sIdx}" class="filter-input" style="padding:5px 8px; font-size:0.85rem;" onchange="saveScopeRow(${sIdx})">
+                                                    <option value="">Pilih PIC...</option>
+                                                    ${(fullData.pics || []).map(p => {
+                                                        const isSel = (s.pic === p || (s.pic||'').toUpperCase() === (p||'').toUpperCase());
+                                                        return `<option value="${p}" ${isSel ? 'selected' : ''}>${p}</option>`;
+                                                    }).join('')}
+                                                </select>
+                                            ` : `
+                                                <span style="font-size:0.85rem; font-weight:600; color:var(--primary);">👤 ${s.pic || '-'}</span>
+                                            `}
                                         </td>
-                                        <td>
-                                            <div style="display:flex; gap:6px;">
-                                                <button class="btn-save" style="padding:5px 12px; font-size:0.78rem;" onclick="saveScopeRow(${sIdx})">💾 Simpan</button>
-                                                <button class="btn-danger" style="padding:5px 10px; font-size:0.78rem;" onclick="deleteScopeRow(${sIdx})">🗑️ Hapus</button>
-                                            </div>
-                                        </td>
+                                        ${isScopeMasterUnlocked ? `
+                                            <td>
+                                                <div style="display:flex; gap:6px;">
+                                                    <button class="btn-save" style="padding:5px 12px; font-size:0.78rem;" onclick="saveScopeRow(${sIdx})">💾 Simpan</button>
+                                                    <button class="btn-danger" style="padding:5px 10px; font-size:0.78rem;" onclick="deleteScopeRow(${sIdx})">🗑️ Hapus</button>
+                                                </div>
+                                            </td>
+                                        ` : ''}
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -4913,12 +5856,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:130px;">KKS / Tag</th>
+                            <th style="width:125px;">KKS / Tag</th>
                             <th>Description</th>
-                            <th style="width:120px;">Setpoint / Range</th>
-                            <th style="width:90px; text-align:center;">🛠️ Kalibrasi</th>
-                            <th style="width:105px; text-align:center;">🔍 Verifikasi (Done)</th>
-                            <th style="width:95px; text-align:center;">Status</th>
+                            <th style="width:105px;">Sub-Area</th>
+                            <th style="width:100px; text-align:center;">Set Point</th>
+                            <th style="width:75px; text-align:center;">Contact</th>
+                            <th style="width:85px; text-align:center;">🛠️ Kalibrasi</th>
+                            <th style="width:95px; text-align:center;">🔍 Verifikasi</th>
+                            <th style="width:90px; text-align:center;">Status</th>
                             <th>Catatan / Temuan</th>
                         </tr>
                     </thead>
@@ -4926,12 +5871,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         ${pswList.map((item, idx) => {
                             const isDone = !!item.verifikasi;
                             const isCalib = !!item.kalibrasi;
+                            const sp = getSetPointDetails(item);
+                            const contact = (item.contact_type || 'NO').toUpperCase();
                             return `
                             <tr>
                                 <td style="text-align:center; font-family:'JetBrains Mono';">${idx + 1}</td>
                                 <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks}</td>
                                 <td style="font-weight:600;">${item.description}</td>
-                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.setpoint || '-'} ${item.range || ''}</td>
+                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.sub_area || item.area || '-'}</td>
+                                <td style="text-align:center;">
+                                    <div class="setpoint-cell" style="padding:1px 5px; min-width:auto;">
+                                        <span class="setpoint-val" style="font-size:0.75rem;">${sp.value}</span>
+                                        <div class="setpoint-divider"></div>
+                                        <span class="setpoint-dir ${sp.dir.toLowerCase()}" style="font-size:0.62rem;">${sp.dir}</span>
+                                    </div>
+                                </td>
+                                <td style="text-align:center;">
+                                    <span class="contact-badge ${contact==='NC'?'contact-nc':'contact-no'}" style="padding:1px 6px; font-size:0.72rem; min-width:auto;">${contact}</span>
+                                </td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isCalib ? '#38bdf8' : 'var(--text-muted)'};">
                                     ${isCalib ? '✅ Selesai' : '⬜ Belum'}
                                 </td>
@@ -5304,16 +6261,39 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
         }
 
-        async function savePressureSwitch(key, idx) {
+        async function savePressureSwitch(arg1, arg2, arg3) {
+            let type = 'pressure_switch';
+            let key = arg1;
+            let idx = arg2;
+            if(arg3 !== undefined) {
+                type = arg1;
+                key = arg2;
+                idx = arg3;
+            }
+            
             const calibChk = document.getElementById(`inst-calib-${idx}`);
             const verifChk = document.getElementById(`inst-verif-${idx}`);
             const remInput = document.getElementById(`inst-rem-${idx}`);
+            const subAreaInput = document.getElementById(`subarea-psw-${idx}`);
+            const spValInput = document.getElementById(`sp-val-psw-${idx}`);
+            const spDirInput = document.getElementById(`sp-dir-psw-${idx}`);
+            const contactInput = document.getElementById(`contact-psw-${idx}`);
             
+            let combinedSp = spValInput ? spValInput.value.trim() : '';
+            if(spDirInput && spDirInput.value && combinedSp) {
+                if(!combinedSp.toUpperCase().includes(spDirInput.value)) {
+                    combinedSp = `${combinedSp} (${spDirInput.value})`;
+                }
+            }
+
             const payload = {
                 unit: currentUnit,
                 type: 'pressure_switch',
                 kks: key,
                 no: key,
+                sub_area: subAreaInput ? subAreaInput.value.trim() : '',
+                set_point: combinedSp,
+                contact_type: contactInput ? contactInput.value : 'NO',
                 asfound_set: document.getElementById(`af-set-${idx}`) ? document.getElementById(`af-set-${idx}`).value : '',
                 asfound_reset: document.getElementById(`af-reset-${idx}`) ? document.getElementById(`af-reset-${idx}`).value : '',
                 asleft_set: document.getElementById(`al-set-${idx}`) ? document.getElementById(`al-set-${idx}`).value : '',
@@ -5331,10 +6311,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
-                showToast('Kalibrasi & Verifikasi Pressure Switch berhasil disimpan!', 'success');
-                loadData();
+                if(result.status === 'success') {
+                    showToast('✓ Set Point, Kontak & Kalibrasi Pressure Switch berhasil disimpan!', 'success');
+                    loadData();
+                } else {
+                    showToast(result.message || 'Gagal menyimpan Pressure Switch', 'error');
+                }
             } catch(e) {
-                showToast('Gagal menyimpan kalibrasi PSW', 'error');
+                showToast('Gagal menyimpan kalibrasi PSW: ' + e.message, 'error');
             }
         }
 
@@ -5515,18 +6499,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const desc = (document.getElementById('new-inst-desc').value || '').trim();
             const kks = (document.getElementById('new-inst-kks').value || '').trim();
             const area = (document.getElementById('new-inst-area').value || '').trim();
-            const range = (document.getElementById('new-inst-range').value || '').trim();
+            const subArea = (document.getElementById('new-inst-subarea')?.value || '').trim();
+            const range = (document.getElementById('new-inst-range')?.value || '').trim();
+            const spVal = (document.getElementById('new-inst-sp-val')?.value || '').trim();
+            const spDir = (document.getElementById('new-inst-sp-dir')?.value || 'HIGH');
+            const contact = (document.getElementById('new-inst-contact')?.value || 'NO');
 
             if(!desc) {
                 showToast('Nama Equipment wajib diisi!', 'error');
                 return;
             }
 
+            let spCombined = spVal;
+            if(spVal && spDir && !spVal.toUpperCase().includes(spDir)) {
+                spCombined = `${spVal} (${spDir})`;
+            }
+
             try {
                 const res = await fetch('/api/add_instrument', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({unit: currentUnit, type: type, equipment: desc, kks: kks, area: area, range: range})
+                    body: JSON.stringify({
+                        unit: currentUnit,
+                        type: type,
+                        equipment: desc,
+                        kks: kks,
+                        area: area,
+                        sub_area: subArea || area,
+                        range: range || spCombined,
+                        set_point: spCombined || range,
+                        contact_type: contact
+                    })
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
@@ -5534,7 +6537,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     document.getElementById('new-inst-desc').value = '';
                     document.getElementById('new-inst-kks').value = '';
                     document.getElementById('new-inst-area').value = '';
-                    document.getElementById('new-inst-range').value = '';
+                    if(document.getElementById('new-inst-subarea')) document.getElementById('new-inst-subarea').value = '';
+                    if(document.getElementById('new-inst-range')) document.getElementById('new-inst-range').value = '';
+                    if(document.getElementById('new-inst-sp-val')) document.getElementById('new-inst-sp-val').value = '';
                     toggleAccordion('add-inst-form');
                     loadData();
                 } else {
@@ -5545,7 +6550,68 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
         }
 
+        /* ---------------- MASTER EIC SECURITY & PASSWORD LOGIC ---------------- */
+        function openMasterPasswordModal() {
+            const modal = document.getElementById('master-pwd-modal');
+            const input = document.getElementById('master-pwd-input');
+            const err = document.getElementById('master-pwd-error');
+            if(err) err.style.display = 'none';
+            if(input) {
+                input.value = '';
+                input.type = 'password';
+            }
+            if(modal) {
+                modal.classList.add('open');
+                modal.classList.add('active');
+                setTimeout(() => { if(input) input.focus(); }, 150);
+            }
+        }
+
+        function closeMasterPasswordModal() {
+            const modal = document.getElementById('master-pwd-modal');
+            if(modal) {
+                modal.classList.remove('open');
+                modal.classList.remove('active');
+            }
+        }
+
+        function toggleMasterPwdVisibility() {
+            const input = document.getElementById('master-pwd-input');
+            if(!input) return;
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        function submitMasterPassword(e) {
+            if(e) e.preventDefault();
+            const input = document.getElementById('master-pwd-input');
+            const err = document.getElementById('master-pwd-error');
+            const val = (input ? input.value : '').trim();
+
+            if(MASTER_PASSWORDS.includes(val.toLowerCase()) || val === 'eic123' || val === 'admin123') {
+                isScopeMasterUnlocked = true;
+                sessionStorage.setItem('eic_scope_unlocked', 'true');
+                closeMasterPasswordModal();
+                showToast('✓ Akses Edit Master EIC Berhasil Dibuka!', 'success');
+                renderTabContent();
+            } else {
+                if(err) err.style.display = 'block';
+                if(input) {
+                    input.classList.add('shake-error');
+                    setTimeout(() => input.classList.remove('shake-error'), 500);
+                    input.select();
+                }
+            }
+        }
+
+        function lockMasterScope() {
+            isScopeMasterUnlocked = false;
+            sessionStorage.removeItem('eic_scope_unlocked');
+            showToast('🔒 Mode Edit Master EIC Berhasil Dikunci Kembali', 'info');
+            renderTabContent();
+        }
+
         async function saveNewScope() {
+            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
             const cat = (document.getElementById('new-scope-cat').value || '').trim();
             const eq = (document.getElementById('new-scope-eq').value || '').trim();
             const type = document.getElementById('new-scope-type').value;
@@ -5595,8 +6661,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function addNewPic() {
+            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
             const input = document.getElementById('new-pic-input');
-            const picName = (input.value || '').trim();
+            const picName = (input ? input.value : '').trim();
             if(!picName) {
                 showToast('Silakan masukkan nama PIC baru.', 'error');
                 return;
@@ -5610,7 +6677,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 showToast(result.message || 'PIC berhasil ditambahkan!', 'success');
-                input.value = '';
+                if(input) input.value = '';
                 loadData();
             } catch(e) {
                 showToast('Gagal menambahkan PIC', 'error');
@@ -5618,6 +6685,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function deletePic(picName) {
+            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
             if(!confirm(`Yakin ingin menghapus PIC "${picName}" dari Master PIC?`)) return;
 
             try {
@@ -5635,6 +6703,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveScopeRow(sIdx) {
+            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
             const item = (fullData.scope_master || [])[sIdx];
             if(!item) return;
             const eqInput = document.getElementById(`scope-eq-${sIdx}`);
@@ -5664,6 +6733,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function deleteScopeRow(sIdx) {
+            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
             const item = (fullData.scope_master || [])[sIdx];
             if(!item) return;
             if(!confirm(`Yakin ingin menghapus baris Master Scope "${item.nama_equipment || ''}"?`)) return;
