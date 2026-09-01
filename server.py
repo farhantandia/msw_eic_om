@@ -1466,6 +1466,95 @@ def save_instrument_update(data):
         if not ok: return {"status": "error", "message": err}
     return {"status": "success", "message": "Instrument updated successfully."}
 
+def save_edit_details(data):
+    unit = data.get("unit", 1)
+    item_type = data.get("item_type", "")
+    identifier = str(data.get("identifier", "")).strip()
+    inst_type = data.get("inst_type", "pressure_tx")
+    path = get_excel_path(unit)
+
+    if not identifier:
+        return {"status": "error", "message": "Missing identifier for the item to edit."}
+
+    with FILE_LOCK:
+        wb = openpyxl.load_workbook(path)
+
+        if item_type == "wo":
+            new_no_wo = str(data.get("new_no_wo", "")).strip()
+            new_job_desc = str(data.get("new_job_description", "")).strip()
+            new_area = str(data.get("new_area", "")).strip()
+
+            if "WorkOrder" in wb.sheetnames:
+                ws = wb["WorkOrder"]
+                for row in ws.iter_rows(min_row=2):
+                    if row[1].value and str(row[1].value).strip() == identifier:
+                        if new_job_desc: row[3].value = new_job_desc
+                        if new_area: row[4].value = new_area
+                        if new_no_wo and new_no_wo != identifier:
+                            row[1].value = new_no_wo
+                            # Update all checklist references
+                            if "WorkOrder_Checklist" in wb.sheetnames:
+                                ws_chk = wb["WorkOrder_Checklist"]
+                                for chk_row in ws_chk.iter_rows(min_row=2):
+                                    if chk_row[0].value and str(chk_row[0].value).strip() == identifier:
+                                        chk_row[0].value = new_no_wo
+                        break
+
+        elif item_type == "actuator":
+            new_eq_id = str(data.get("new_equipment_id", "")).strip()
+            new_eq_desc = str(data.get("new_equipment_description", "")).strip()
+            new_kks = str(data.get("new_kks", "")).strip()
+            new_area = str(data.get("new_area", "")).strip()
+
+            if "ActuatorValve" in wb.sheetnames:
+                ws = wb["ActuatorValve"]
+                for row in ws.iter_rows(min_row=2):
+                    row_eq = str(row[0].value).strip() if row[0].value else ""
+                    if row_eq == identifier:
+                        if new_eq_id: row[0].value = new_eq_id
+                        if new_area: row[1].value = new_area
+                        if new_eq_desc: row[2].value = new_eq_desc
+                        if new_kks or new_kks == "": row[3].value = new_kks
+                        break
+
+        elif item_type == "instrument":
+            new_equipment = str(data.get("new_equipment", "")).strip()
+            new_kks = str(data.get("new_kks", "")).strip()
+            new_area = str(data.get("new_area", "")).strip()
+
+            sheet_map = {
+                "pressure_tx": "Instrument_PressureTX",
+                "temperature_tx": "Instrument_TemperatureTX",
+                "pressure_switch": "Instrument_PressureSwitch"
+            }
+            sheet_name = sheet_map.get(inst_type, "Instrument_PressureTX")
+
+            new_range = str(data.get("new_range", "")).strip()
+
+            if sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                for row in ws.iter_rows(min_row=2):
+                    row_kks = str(row[3].value).strip() if row[3].value else ""
+                    row_no = str(row[0].value).strip() if row[0].value else ""
+                    if row_kks == identifier or row_no == identifier:
+                        if new_area: row[1].value = new_area
+                        if new_equipment: row[2].value = new_equipment
+                        if new_kks or new_kks == "": row[3].value = new_kks
+                        if new_range and inst_type in ("pressure_tx", "temperature_tx"):
+                            row[5].value = new_range
+                        if inst_type in ("pressure_switch", "psw"):
+                            new_sub_area = str(data.get("new_sub_area", "")).strip()
+                            new_set_point = str(data.get("new_set_point", "")).strip()
+                            new_contact_type = str(data.get("new_contact_type", "")).strip()
+                            if new_sub_area: row[5].value = new_sub_area
+                            if new_set_point: row[6].value = new_set_point
+                            if new_contact_type: row[7].value = new_contact_type
+                        break
+
+        ok, err = safe_save_workbook(wb, path)
+        if not ok: return {"status": "error", "message": err}
+    return {"status": "success", "message": f"Item details updated successfully."}
+
 def sanitize_folder_name(name):
     clean = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in str(name).strip())
     return clean or "ITEM"
@@ -1706,7 +1795,8 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             "/api/add_actuator": save_add_actuator,
             "/api/delete_actuator": save_delete_actuator,
             "/api/add_instrument": save_add_instrument,
-            "/api/delete_instrument": save_delete_instrument
+            "/api/delete_instrument": save_delete_instrument,
+            "/api/edit_details": save_edit_details
         }
 
         if parsed.path in routes:
@@ -2154,6 +2244,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
         }
         .btn-finding:hover { background: #f43f5e; color: #fff; }
+        .btn-edit-details {
+            padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 700;
+            background: rgba(99, 102, 241, 0.12); color: var(--primary); border: 1px solid rgba(99, 102, 241, 0.3);
+            cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+        }
+        .btn-edit-details:hover { background: rgba(99, 102, 241, 0.3); }
         .btn-danger { background: rgba(244, 63, 94, 0.15); color: var(--status-alert); border: 1px solid rgba(244, 63, 94, 0.3); padding: 7px 14px; font-weight: 700; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.82rem; }
 
         /* Calibration Box */
@@ -3250,6 +3346,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Edit Details Modal -->
+    <div class="modal-overlay" id="edit-details-modal">
+        <div class="modal-content" style="max-width: 580px;">
+            <div class="modal-header">
+                <div>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;" id="edit-details-title">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                        Edit Item Details
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted);" id="edit-details-subtitle">Equipment / Work Order</div>
+                </div>
+                <button class="modal-close" onclick="closeEditDetailsModal()">&times;</button>
+            </div>
+
+            <div id="edit-details-fields" class="form-grid" style="margin-top:16px;"></div>
+
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px; border-top:1px solid var(--border-color); padding-top:14px;">
+                <button class="page-btn" onclick="closeEditDetailsModal()">Cancel</button>
+                <button class="btn-save" onclick="saveEditDetails()" style="display:inline-flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Details
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Dedicated Report Modal with 4 Options -->
     <div class="modal-overlay" id="report-modal">
         <div class="modal-content" style="max-width: 1050px; max-height: 92vh; display: flex; flex-direction: column;">
@@ -3617,7 +3738,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             sun: `<svg class="ui-icon md" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`,
             moon: `<svg class="ui-icon md" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`,
             eye: `<svg class="ui-icon md" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`,
-            eyeOff: `<svg class="ui-icon md" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`
+            eyeOff: `<svg class="ui-icon md" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`,
+            edit: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>`
         };
         let currentUnit = 1;
         let currentTab = 'wo';
@@ -4006,6 +4128,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <div class="item-name">${item.job_description}</div>
                             </div>
                             <div class="header-actions">
+                                <button class="btn-edit-details" onclick="event.stopPropagation(); openEditDetailsModal('wo', '${item.no_wo}', {no_wo:'${item.no_wo}', job_description:'${(item.job_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}'})">
+                                    ${Icons.edit} Edit
+                                </button>
                                 <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('wo', '${item.no_wo}', '${item.no_wo} - ${item.job_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
                                     ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
                                 </button>
@@ -4271,6 +4396,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <div class="item-name">${item.equipment_description}</div>
                             </div>
                             <div class="header-actions">
+                                <button class="btn-edit-details" onclick="event.stopPropagation(); openEditDetailsModal('actuator', '${item.equipment_id}', {equipment_id:'${(item.equipment_id||'').replace(/'/g, "\\'")}', equipment_description:'${(item.equipment_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}'})">
+                                    ${Icons.edit} Edit
+                                </button>
                                 <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('actuator', '${item.equipment_id}', '${item.equipment_id} - ${item.equipment_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
                                     ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
                                 </button>
@@ -4580,6 +4708,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
                             <div class="header-actions">
+                                <button class="btn-edit-details" onclick="event.stopPropagation(); openEditDetailsModal('instrument', '${item.kks || item.no}', {equipment:'${(title||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', no:'${item.no||''}', description:'${(item.description||'').replace(/'/g, "\\'")}', range:'${(item.range||'').replace(/'/g, "\\'")}', sub_area:'${(item.sub_area||'').replace(/'/g, "\\'")}', set_point:'${(sp?sp.value:'').replace(/'/g, "\\'")}', sp_dir:'${sp?sp.dir:'HIGH'}', contact_type:'${(contact||'NO')}'}, '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
+                                    ${Icons.edit} Edit
+                                </button>
                                 <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
                                     ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
                                 </button>
@@ -4605,30 +4736,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
                             ${instSubtab === 'psw' ? `
-                            <div class="form-grid" style="margin-bottom:14px; background:var(--bg-sub); padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border-color);">
-                                <div class="form-group">
-                                    <label>Sub-Area / System</label>
-                                    <input type="text" id="subarea-psw-${idx}" class="filter-input" value="${item.sub_area || item.area || ''}" placeholder="SUB 1, Lower Burner, Pri Fan 1...">
-                                </div>
-                                <div class="form-group">
-                                    <label>Set Point (Value)</label>
-                                    <input type="text" id="sp-val-psw-${idx}" class="filter-input" value="${sp.value}" placeholder="e.g. 8 Bar, 2.5 Kg/Cm2">
-                                </div>
-                                <div class="form-group">
-                                    <label>Set Point Direction</label>
-                                    <select id="sp-dir-psw-${idx}" class="filter-input">
-                                        <option value="HIGH" ${sp.dir==='HIGH'?'selected':''}>HIGH</option>
-                                        <option value="LOW" ${sp.dir==='LOW'?'selected':''}>LOW</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Contact Type (NO / NC)</label>
-                                    <select id="contact-psw-${idx}" class="filter-input">
-                                        <option value="NO" ${contact==='NO'?'selected':''}>NO (Normally Open)</option>
-                                        <option value="NC" ${contact==='NC'?'selected':''}>NC (Normally Closed)</option>
-                                    </select>
-                                </div>
-                            </div>
                             <div class="calib-grid">
                                 <div class="calib-col">
                                     <h5>AS FOUND (Initial Condition)</h5>
@@ -5024,6 +5131,166 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         function closeFindingModal() {
             document.getElementById('finding-modal').classList.remove('open');
             activeFinding = null;
+        }
+
+        /* ---- Edit Details Modal ---- */
+        let activeEditDetails = null;
+
+        function openEditDetailsModal(itemType, identifier, currentData, instType) {
+            activeEditDetails = { itemType, identifier, instType: instType || '' };
+            const titleEl = document.getElementById('edit-details-title');
+            const subtitleEl = document.getElementById('edit-details-subtitle');
+            const fieldsEl = document.getElementById('edit-details-fields');
+
+            let fieldsHtml = '';
+            if (itemType === 'wo') {
+                titleEl.innerHTML = `${Icons.edit} Edit Work Order Details`;
+                subtitleEl.innerText = `${currentData.no_wo} — ${currentData.job_description}`;
+                fieldsHtml = `
+                    <div class="form-group">
+                        <label>WO Number</label>
+                        <input type="text" id="edit-det-no-wo" class="filter-input" value="${currentData.no_wo || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>System Area</label>
+                        <input type="text" id="edit-det-area" class="filter-input" value="${currentData.area || ''}" placeholder="BOILER, ID FAN, COOLING TOWER...">
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Job Description</label>
+                        <input type="text" id="edit-det-job-desc" class="filter-input" value="${currentData.job_description || ''}">
+                    </div>
+                `;
+            } else if (itemType === 'actuator') {
+                titleEl.innerHTML = `${Icons.edit} Edit Actuator Details`;
+                subtitleEl.innerText = `${currentData.equipment_id} — ${currentData.equipment_description}`;
+                fieldsHtml = `
+                    <div class="form-group">
+                        <label>Equipment ID</label>
+                        <input type="text" id="edit-det-eq-id" class="filter-input" value="${currentData.equipment_id || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>System Area</label>
+                        <input type="text" id="edit-det-area" class="filter-input" value="${currentData.area || ''}" placeholder="BOILER, TURBINE...">
+                    </div>
+                    <div class="form-group">
+                        <label>Equipment Description</label>
+                        <input type="text" id="edit-det-eq-desc" class="filter-input" value="${currentData.equipment_description || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>KKS Tag</label>
+                        <input type="text" id="edit-det-kks" class="filter-input" value="${currentData.kks || ''}" placeholder="10LAB30AA210">
+                    </div>
+                `;
+            } else if (itemType === 'instrument') {
+                const title = currentData.equipment || currentData.description || '';
+                const isPswType = instType === 'pressure_switch';
+                titleEl.innerHTML = `${Icons.edit} Edit Instrument Details`;
+                subtitleEl.innerText = `${currentData.kks || currentData.no} — ${title}`;
+                fieldsHtml = `
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Equipment / Description</label>
+                        <input type="text" id="edit-det-equipment" class="filter-input" value="${title}">
+                    </div>
+                    <div class="form-group">
+                        <label>KKS Tag</label>
+                        <input type="text" id="edit-det-kks" class="filter-input" value="${currentData.kks || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>System Area</label>
+                        <input type="text" id="edit-det-area" class="filter-input" value="${currentData.area || ''}" placeholder="BOILER, ESP, TURBINE...">
+                    </div>
+                    ${!isPswType ? `<div class="form-group" style="grid-column: span 2;">
+                        <label>Transmitter Range</label>
+                        <input type="text" id="edit-det-range" class="filter-input" value="${currentData.range || ''}" placeholder="-70 - 70 mbar / 0 - 100 kPa">
+                    </div>` : `
+                    <div class="form-group">
+                        <label>Sub-Area / System</label>
+                        <input type="text" id="edit-det-subarea" class="filter-input" value="${currentData.sub_area || ''}" placeholder="SUB 1, Lower Burner, Pri Fan 1...">
+                    </div>
+                    <div class="form-group">
+                        <label>Set Point (Value)</label>
+                        <input type="text" id="edit-det-setpoint" class="filter-input" value="${currentData.set_point || ''}" placeholder="e.g. 8 Bar, 2.5 Kg/Cm2">
+                    </div>
+                    <div class="form-group">
+                        <label>Set Point Direction</label>
+                        <select id="edit-det-spdir" class="filter-input">
+                            <option value="HIGH" ${(currentData.sp_dir||'HIGH')==='HIGH'?'selected':''}>HIGH</option>
+                            <option value="LOW" ${(currentData.sp_dir||'HIGH')==='LOW'?'selected':''}>LOW</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Contact Type (NO / NC)</label>
+                        <select id="edit-det-contact" class="filter-input">
+                            <option value="NO" ${(currentData.contact_type||'NO')==='NO'?'selected':''}>NO (Normally Open)</option>
+                            <option value="NC" ${(currentData.contact_type||'NO')==='NC'?'selected':''}>NC (Normally Closed)</option>
+                        </select>
+                    </div>
+                    `}
+                `;
+            }
+            fieldsEl.innerHTML = fieldsHtml;
+            document.getElementById('edit-details-modal').classList.add('open');
+        }
+
+        function closeEditDetailsModal() {
+            document.getElementById('edit-details-modal').classList.remove('open');
+            activeEditDetails = null;
+        }
+
+        async function saveEditDetails() {
+            if (!activeEditDetails) return;
+            const { itemType, identifier, instType } = activeEditDetails;
+            const payload = {
+                unit: currentUnit,
+                item_type: itemType,
+                identifier: identifier,
+                inst_type: instType
+            };
+
+            if (itemType === 'wo') {
+                payload.new_no_wo = (document.getElementById('edit-det-no-wo') || {}).value || '';
+                payload.new_job_description = (document.getElementById('edit-det-job-desc') || {}).value || '';
+                payload.new_area = (document.getElementById('edit-det-area') || {}).value || '';
+            } else if (itemType === 'actuator') {
+                payload.new_equipment_id = (document.getElementById('edit-det-eq-id') || {}).value || '';
+                payload.new_equipment_description = (document.getElementById('edit-det-eq-desc') || {}).value || '';
+                payload.new_kks = (document.getElementById('edit-det-kks') || {}).value || '';
+                payload.new_area = (document.getElementById('edit-det-area') || {}).value || '';
+            } else if (itemType === 'instrument') {
+                payload.new_equipment = (document.getElementById('edit-det-equipment') || {}).value || '';
+                payload.new_kks = (document.getElementById('edit-det-kks') || {}).value || '';
+                payload.new_area = (document.getElementById('edit-det-area') || {}).value || '';
+                const rangeEl = document.getElementById('edit-det-range');
+                if (rangeEl) payload.new_range = rangeEl.value || '';
+                const subAreaEl = document.getElementById('edit-det-subarea');
+                if (subAreaEl) payload.new_sub_area = subAreaEl.value || '';
+                const spEl = document.getElementById('edit-det-setpoint');
+                if (spEl) {
+                    const spDir = (document.getElementById('edit-det-spdir') || {}).value || '';
+                    const spVal = spEl.value || '';
+                    payload.new_set_point = spDir ? spVal + ' (' + spDir + ')' : spVal;
+                }
+                const contactEl = document.getElementById('edit-det-contact');
+                if (contactEl) payload.new_contact_type = contactEl.value || '';
+            }
+
+            try {
+                const res = await fetch('/api/edit_details', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const result = await res.json();
+                if (result.status === 'success') {
+                    showToast(result.message || 'Details updated!', 'success');
+                    closeEditDetailsModal();
+                    loadData();
+                } else {
+                    showToast(result.message || 'Failed to update details', 'error');
+                }
+            } catch(e) {
+                showToast('Failed to save detail changes', 'error');
+            }
         }
 
         function renderModalPhotos(photos) {
@@ -6411,26 +6678,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const calibChk = document.getElementById(`inst-calib-${idx}`);
             const verifChk = document.getElementById(`inst-verif-${idx}`);
             const remInput = document.getElementById(`inst-rem-${idx}`);
-            const subAreaInput = document.getElementById(`subarea-psw-${idx}`);
-            const spValInput = document.getElementById(`sp-val-psw-${idx}`);
-            const spDirInput = document.getElementById(`sp-dir-psw-${idx}`);
-            const contactInput = document.getElementById(`contact-psw-${idx}`);
-            
-            let combinedSp = spValInput ? spValInput.value.trim() : '';
-            if(spDirInput && spDirInput.value && combinedSp) {
-                if(!combinedSp.toUpperCase().includes(spDirInput.value)) {
-                    combinedSp = `${combinedSp} (${spDirInput.value})`;
-                }
-            }
 
             const payload = {
                 unit: currentUnit,
                 type: 'pressure_switch',
                 kks: key,
                 no: key,
-                sub_area: subAreaInput ? subAreaInput.value.trim() : '',
-                set_point: combinedSp,
-                contact_type: contactInput ? contactInput.value : 'NO',
                 asfound_set: document.getElementById(`af-set-${idx}`) ? document.getElementById(`af-set-${idx}`).value : '',
                 asfound_reset: document.getElementById(`af-reset-${idx}`) ? document.getElementById(`af-reset-${idx}`).value : '',
                 asleft_set: document.getElementById(`al-set-${idx}`) ? document.getElementById(`al-set-${idx}`).value : '',
@@ -6441,6 +6694,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 remarks: remInput ? remInput.value : ''
             };
 
+            const subAreaInput = document.getElementById(`subarea-psw-${idx}`);
+            const spValInput = document.getElementById(`sp-val-psw-${idx}`);
+            const spDirInput = document.getElementById(`sp-dir-psw-${idx}`);
+            const contactInput = document.getElementById(`contact-psw-${idx}`);
+
+            if(subAreaInput) payload.sub_area = subAreaInput.value.trim();
+            if(spValInput) {
+                let combinedSp = spValInput.value.trim();
+                if(spDirInput && spDirInput.value && combinedSp) {
+                    if(!combinedSp.toUpperCase().includes(spDirInput.value)) {
+                        combinedSp = `${combinedSp} (${spDirInput.value})`;
+                    }
+                }
+                payload.set_point = combinedSp;
+            }
+            if(contactInput) payload.contact_type = contactInput.value;
+
             try {
                 const res = await fetch('/api/update_instrument', {
                     method: 'POST',
@@ -6449,7 +6719,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast('✓ Set Point, Contact & Calibration for Pressure Switch saved successfully!', 'success');
+                    showToast('✓ Calibration & verification for Pressure Switch saved successfully!', 'success');
                     loadData();
                 } else {
                     showToast(result.message || 'Failed to save Pressure Switch', 'error');
