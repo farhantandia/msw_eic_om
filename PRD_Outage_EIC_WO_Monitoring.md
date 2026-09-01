@@ -2,249 +2,267 @@
 ## Outage EIC Work Order Monitoring System
 **PLTU MSW (2 x 30MW) &bull; Section Electric, Instrument & Control (EIC)**
 
-| Metrik Dokumen | Keterangan |
+| Document Metric | Specification |
 | :--- | :--- |
-| **Versi Dokumen** | **1.5 (Production Release)** |
-| **Disusun Oleh** | M. Farhan Tandia (EIC & IT Supervisor) & Tim EIC PLTU MSW |
-| **Tanggal Pembaruan** | **30 Agustus 2026** |
-| **Status Dokumen** | **Approved & Deployed in Production** |
-| **Target Runtime** | Standalone Binary (`server.exe`) & Python 3.8+ Localhost / LAN |
+| **Document Version** | **2.0 (Enterprise Production Release)** |
+| **Author / Lead** | M. Farhan Tandia (EIC & IT Supervisor) & EIC Team PLTU MSW |
+| **Last Updated** | **September 1, 2026** |
+| **Status** | **Approved & Active in Production** |
+| **Runtime Target** | Standalone Windows Executable (`server.exe`) & Python 3.8+ (Localhost / LAN) |
 
 ---
 
-## 📜 Daftar Isi (Table of Contents)
-1. [Latar Belakang & Pernyataan Masalah](#1-latar-belakang--pernyataan-masalah)
-2. [Tujuan Produk & Manfaat Bisnis](#2-tujuan-produk--manfaat-bisnis)
-3. [Arsitektur Sistem & Karakteristik Deployment](#3-arsitektur-sistem--karakteristik-deployment)
-4. [Daftar File yang Diperlukan untuk Menjalankan Aplikasi](#4-daftar-file-yang-diperlukan-untuk-menjalankan-aplikasi-required-files)
-5. [Struktur Data & Spesifikasi Master Excel](#5-struktur-data--spesifikasi-master-excel)
-6. [Kebutuhan Fungsional (Functional Requirements)](#6-kebutuhan-fungsional-functional-requirements)
-7. [Kebutuhan Non-Fungsional (Non-Functional Requirements)](#7-kebutuhan-non-fungsional-non-functional-requirements)
-8. [Riwayat Perubahan & Evolusi Pengembangan yang Sangat Lengkap (Complete Changelog)](#8-riwayat-perubahan--evolusi-pengembangan-lengkap-changelog)
-9. [Petunjuk Pengoperasian & Alur Kerja Lapangan](#9-petunjuk-pengoperasian--alur-kerja-lapangan)
+## 📜 Table of Contents
+1. [Background & Problem Statement](#1-background--problem-statement)
+2. [Product Objectives & Business Impact](#2-product-objectives--business-impact)
+3. [System Architecture & Deployment](#3-system-architecture--deployment)
+4. [Project Directory & File Structure](#4-project-directory--file-structure)
+5. [Database Schema & Master Excel Specification](#5-database-schema--master-excel-specification)
+6. [Functional Requirements (FR)](#6-functional-requirements)
+7. [Non-Functional Requirements (NFR)](#7-non-functional-requirements)
+8. [Design System & Modern Iconography](#8-design-system--modern-iconography)
+9. [Complete Changelog & Evolution History](#9-complete-changelog--evolution-history)
+10. [Field Operations & Standard Operating Procedures](#10-field-operations--standard-operating-procedures)
 
 ---
 
-## 1. Latar Belakang & Pernyataan Masalah
+## 1. Background & Problem Statement
 
-Setiap pelaksanaan pemeliharaan periodik pembangkit (*Major / Minor Outage*), tim Section Electric, Instrument & Control (EIC) PLTU MSW mengelola ratusan item pekerjaan lapangan yang sebelumnya tersebar di berbagai file spreadsheet terpisah:
+During periodic major and minor overhauls (*Major / Minor Outage*), the Section Electric, Instrument & Control (EIC) at PLTU MSW manages hundreds of high-precision field tasks. Historically, these records were fragmented across disparate spreadsheet files:
 
-1. **`Progress_Outage_Unit_1_EIC.xlsx`** — Tracker Work Order utama section EIC berisi daftar WO beserta checklist sub-task teknis (misal: *inspection frame motor*, *regreasing*, *megger test*, *solo run*), status progress, dan PIC pelaksana.
-2. **`AMP-MSW-Progress_Actuator_Unit_1_2026.xlsx`** — Tracker verifikasi motorized actuator valve per area (Boiler, Turbine, Aux) dengan tahapan *General Inspection* dan *Function Test*.
-3. **`JAPA-MSW-Progress_Transmitter_&_Switch_Unit_2_2026.xls`** — Tracker verifikasi dan kalibrasi field transmitter (PTX, TTX) dan pressure switch (PSW) dengan data *As Found* vs *As Left*.
-4. **`PIC_Outage_Unit_1_2026.xlsx`** — Master pembagian scope pekerjaan per kategori (Vendor Scope vs MSW Scope) dan plotting PIC.
+1. **`Progress_Outage_Unit_1_EIC.xlsx`** — Master Work Order tracker containing mechanical, electrical, and control subtasks (e.g., motor insulation resistance testing, contact resistance, relay calibrations, solo runs).
+2. **`AMP-MSW-Progress_Actuator_Unit_1_2026.xlsx`** — Motorized actuator valve inspection tracker covering physical general inspections and function stroke tests across Boiler, Turbine, and Auxiliaries.
+3. **`JAPA-MSW-Progress_Transmitter_&_Switch_Unit_2_2026.xls`** — Sensor calibration logs for Pressure Transmitters (PTX), Temperature Transmitters (TTX), and Pressure Switches (PSW) recording *As Found* vs. *As Left* data.
+4. **`PIC_Scope_Master`** — Vendor vs. MSW scope delineation and personnel resource allocation.
 
-### Permasalahan yang Dihadapi:
-- **Fragmentasi Data:** Data tersebar di 4+ file spreadsheet dengan format berbeda, memicu risiko duplikasi, konflik versi data, dan inkonsistensi.
-- **Ketiadaan Visibilitas Terpadu:** Manajemen dan supervisor tidak memiliki satu dashboard real-time untuk memantau kemajuan total outage tanpa merekap manual dari banyak lembar kerja.
-- **Keterlambatan Pelaporan:** Penyusunan laporan progres harian, pembuatan kurva capaian (Kurva-S), dan ringkasan ke grup koordinasi membutuhkan waktu rekap manual yang menyita waktu operasional lapangan.
-
----
-
-## 2. Tujuan Produk & Manfaat Bisnis
-
-Platform **Outage EIC Work Order Monitoring System** dibangun untuk mencapai sasaran strategis:
-- **Unifikasi Database:** Menyatukan seluruh data WO, Actuator, Instrument, dan PIC ke dalam database terstandarisasi (`Template_Outage_EIC_Monitoring_unit 1.xlsx` dan `unit 2.xlsx`).
-- **Sinkronisasi Dua Arah Real-Time (*Two-Way Live Sync*):** Setiap centang checklist, pengisian temuan, dan perubahan status di aplikasi web langsung disinkronkan secara aman (*thread-safe*) ke spreadsheet Excel.
-- **Otomatisasi Pelaporan:** Menghasilkan 4 opsi laporan resmi berstandar operasional, pencetakan PDF, ekspor spreadsheet utuh, Kurva-S visual, dan format ringkasan WhatsApp dengan 1-klik.
-- **Digitalisasi Bukti Lapangan (*Paperless*):** Pengunggahan multi-foto temuan lapangan dan dokumentasi rekomendasi tindak lanjut secara terpusat.
+### Operational Challenges:
+- **Data Fragmentation & Inconsistency:** Manual consolidation across multiple spreadsheet formats introduced version conflicts, duplicate entries, and reporting lags.
+- **Lack of Unified Real-Time Visibility:** Supervisors and plant management had to manually compile multiple workbooks to ascertain overall progress and identify bottlenecks.
+- **Reporting Overhead:** Compiling daily progress reports, computing cumulative S-Curves, and formatting WhatsApp team briefings required significant manual effort.
+- **Security & Authorization Risks:** Master scopes and personnel assignments lacked protection against accidental edits or unauthorized overwrites.
 
 ---
 
-## 3. Arsitektur Sistem & Karakteristik Deployment
+## 2. Product Objectives & Business Impact
 
-Sistem dirancang dengan arsitektur **Zero-Dependency Portable Server** yang tangguh, ringan, dan siap dijalankan di lingkungan industri pembangkit tanpa memerlukan instalasi database server yang rumit:
+The **Outage EIC Work Order Monitoring System** solves these challenges through a unified, high-performance platform:
 
-- **Backend:** Pure Python HTTP Server (`server.py`) berbasis `http.server` dan `openpyxl` untuk manipulasi data Excel.
-- **Frontend:** Single-Page Application (SPA) responsif menggunakan Vanilla JavaScript, Modern CSS (Glassmorphism, CSS Grid, CSS Variables), serta SVG Chart Generator untuk visualisasi Kurva-S.
-- **Thread-Safety:** Mekanisme penguncian file (`threading.Lock`) untuk mencegah *race condition* saat beberapa pengguna membaca/menulis ke file Excel yang sama.
-- **Mode Akses:**
-  - Standalone Application (`server.exe`) tanpa instalasi Python.
-  - Akses lokal via `http://localhost:8000`.
-  - Akses multi-perangkat via Jaringan LAN / WiFi Pembangkit (`http://<IP_KOMPUTER_SERVER>:8000`).
+- **Single Source of Truth:** Centralizes Work Orders, Actuator Valves, Field Instruments, Master Scopes, and Team PICs into structured master workbooks (`Template_Outage_EIC_Monitoring_unit 1.xlsx` and `Template_Outage_EIC_Monitoring_unit 2.xlsx`).
+- **Two-Way Thread-Safe Synchronization:** Subtask toggles, finding logs, and status updates on the web UI commit instantly to Excel files with file-level locking (`threading.Lock`), ensuring data integrity.
+- **Automated Multi-Format Reporting:** Instant 1-click generation of 4 standardized PDF reports, full `.xlsx` workbook exports, mathematical S-Curve trajectories, and WhatsApp briefing formats.
+- **Master Security & Authorization:** Password-protected Master EIC & PIC scopes ensuring data governance.
+- **Paperless Field Evidence:** Integrated field photo evidence upload, defect descriptions, and corrective action logging.
+- **Enterprise-Grade UI/UX:** Full English localization, minimalist vector SVG iconography (Lucide style), dark/light themes, and responsive layout.
 
 ---
 
-## 4. Daftar File yang Diperlukan untuk Menjalankan Aplikasi (Required Files)
+## 3. System Architecture & Deployment
 
-Untuk mendistribusikan dan menjalankan aplikasi di komputer operasional mana pun, file dan folder berikut **wajib tersedia dalam satu direktori kerja**:
+The platform is designed with a **Zero-Dependency Portable Server Architecture** that runs natively in industrial power plant network environments:
 
-```plaintext
-d:\msw\msw_eic_om\
-├── server.exe                                    # [UTAMA] Binary aplikasi executable Windows (Standalone)
-├── Template_Outage_EIC_Monitoring_unit 1.xlsx   # [UTAMA] Master database spreadsheet Unit 1
-├── Template_Outage_EIC_Monitoring_unit 2.xlsx   # [UTAMA] Master database spreadsheet Unit 2
-├── Finding/                                     # [UTAMA] Direktori penyimpanan foto & deskripsi temuan
-│   ├── UNIT 1/
-│   └── UNIT 2/
-├── start_app.bat                                # [OPSIONAL] Skrip peluncur otomatis browser
-├── server.py                                    # [DEV] Source code Python backend & frontend
-├── server.spec                                  # [DEV] Konfigurasi kompilasi PyInstaller
-├── README.md                                    # [DOKUMEN] Panduan pengguna & dokumentasi GitHub
-└── PRD_Outage_EIC_WO_Monitoring.md              # [DOKUMEN] Dokumen spesifikasi kebutuhan produk (PRD)
+```
++-----------------------------------------------------------------------------------+
+|                                 CLIENT BROWSERS                                   |
+|   (Desktop Workstations, Control Room PCs, Field Smartphones & Tablets via LAN)   |
++-----------------------------------------+-----------------------------------------+
+                                          | HTTP / JSON API (Port 8000)
+                                          v
++-----------------------------------------------------------------------------------+
+|                            PYTHON BACKEND HTTP SERVER                             |
+|              (Standalone `server.exe` or `python server.py`)                      |
+|                                                                                   |
+|  * Thread-Safe REST Endpoints:                                                    |
+|    - `/api/data`               : Fetches full outage datasets & KPI metrics       |
+|    - `/api/quick_toggle_subtask`: Real-time subtask check & cross-component sync  |
+|    - `/api/update_wo`          : Work Order modifications & checklist persistence |
+|    - `/api/update_actuator`    : General inspection & function test updates       |
+|    - `/api/update_instrument`  : Calibration & verification milestones            |
+|    - `/api/upload_finding_photo`: Multi-photo upload & defect logging             |
+|    - `/api/export_excel`       : Live Excel workbook export (.xlsx)               |
+|                                                                                   |
+|  * Business Logic Engines:                                                        |
+|    - Smart KKS & Tag Matcher   : Cross-component synchronization engine           |
+|    - S-Curve Math Generator    : Normalized sigmoid trajectory & variance logic   |
+|    - Excel Read/Write Engine   : Thread-locked openpyxl handler                   |
++-----------------------------------------+-----------------------------------------+
+                                          | Safe File I/O
+                                          v
++-----------------------------------------------------------------------------------+
+|                               PERSISTENCE LAYER                                   |
+|                                                                                   |
+|  * Master Excel Workbooks:                                                        |
+|    - `Template_Outage_EIC_Monitoring_unit 1.xlsx` (Unit 1 Data)                   |
+|    - `Template_Outage_EIC_Monitoring_unit 2.xlsx` (Unit 2 Data)                   |
+|  * Field Photos & Media:                                                          |
+|    - `Finding/UNIT 1/<Equipment_ID>/`                                             |
+|    - `Finding/UNIT 2/<Equipment_ID>/`                                             |
++-----------------------------------------------------------------------------------+
 ```
 
-### Rincian Kebutuhan Minimum:
-| Kategori | Spesifikasi Minimum |
-| :--- | :--- |
-| **Sistem Operasi** | Windows 7 / 8 / 10 / 11 (64-bit) |
-| **Penyimpanan** | Ruang disk minimal 150 MB (termasuk penyimpanan foto temuan) |
-| **Browser** | Google Chrome, Microsoft Edge, Firefox, atau browser modern lainnya |
-| **Aplikasi Excel** | Microsoft Excel 2010+ / LibreOffice / WPS Office (Hanya jika ingin membuka manual) |
-| **Port Jaringan** | Port `8000` (dapat diubah jika diperlukan) |
+---
+
+## 4. Project Directory & File Structure
+
+```plaintext
+d:\GitHub\msw_eic_om\
+├── server.exe                                    # Standalone Windows executable (No Python runtime required)
+├── server.py                                     # Core Python server, REST API, & Single Page Application
+├── start_app.bat                                 # One-click startup batch script
+├── server.spec                                   # PyInstaller compilation specification
+├── Template_Outage_EIC_Monitoring_unit 1.xlsx    # Master database workbook for Unit 1
+├── Template_Outage_EIC_Monitoring_unit 2.xlsx    # Master database workbook for Unit 2
+├── Finding/                                      # Persistent storage for photo evidence
+│   ├── UNIT 1/
+│   │   └── <Equipment_ID>/foto_1.jpg, foto_2.jpg, ...
+│   └── UNIT 2/
+│       └── <Equipment_ID>/foto_1.jpg, foto_2.jpg, ...
+├── screenshots/                                  # Visual documentation & system screenshots
+├── README.md                                     # Main repository documentation & guide
+└── PRD_Outage_EIC_WO_Monitoring.md               # Product Requirements Document (PRD v2.0)
+```
 
 ---
 
-## 5. Struktur Data & Spesifikasi Master Excel
+## 5. Database Schema & Master Excel Specification
 
-Master database menggunakan workbook `.xlsx` yang terdiri dari 8 lembar kerja (*sheets*):
+Each master workbook contains **8 standardized sheets**:
 
-1. **`WorkOrder`**: Menyimpan data utama WO: `No, No_WO, Unit, Job_Description, Area, Tanggal_Schedule, Tanggal_Actual_Start, Tanggal_Finish, Status, PIC, N_Task, Persen_Progress, Scope, Remarks, Temuan, Tindak_Lanjut, Jumlah_Foto`.
-2. **`WorkOrder_Checklist`**: Menyimpan sub-task teknis per WO: `No_WO, Sub_Task_Description, Tanggal, PIC_Task, Selesai_TRUE_FALSE, Temuan, Tindak_Lanjut, Jumlah_Foto`.
-3. **`ActuatorValve`**: Menyimpan data seluruh motorized actuator valve: `Equipment_ID, Area, Equipment_Description, KKS, Unit, PIC, Status, Persen_Progress, Finish_Date, General_Inspection_TRUE_FALSE, Function_Test_TRUE_FALSE, Remarks, Temuan, Tindak_Lanjut, Jumlah_Foto`.
-4. **`Instrument_PressureTX`**: Data transmitter tekanan: `No, Area, Equipment, KKS, Unit, Range, Tanggal/Finish_Date, Status_WDONE_TRUE_FALSE, Remarks, Temuan, Tindak_Lanjut, Jumlah_Foto`.
-5. **`Instrument_TemperatureTX`**: Data transmitter suhu: `No, Area, Equipment, KKS, Unit, Range, Tanggal/Finish_Date, Status_WDONE_TRUE_FALSE, Remarks, Temuan, Tindak_Lanjut, Jumlah_Foto`.
-6. **`Instrument_PressureSwitch`**: Data switch tekanan lengkap: `No, Area, Description, KKS, Unit, Sub_Area, Set_Point, Contact_Type_NO_NC, AsFound_Set, AsFound_Reset, AsLeft_Set, AsLeft_Reset, Status_OK_NotOK, Status_WDONE_TRUE_FALSE, Dated, Finish_Date, Remarks, Temuan, Tindak_Lanjut, Jumlah_Foto`.
-7. **`PIC_Scope_Master`**: Master pembagian kategori scope (A-E) dan pemetaan PIC.
-8. **`Dashboard_Summary`**: Ringkasan kalkulasi otomatis via formula `COUNTIFS`.
-
----
-
-## 6. Kebutuhan Fungsional (Functional Requirements)
-
-### 6.1. Real-Time Dashboard & Manajemen KPI
-- **FR-1.1:** Menghitung otomatis persentase Grand Total Outage berdasarkan perolehan sub-task yang telah diselesaikan.
-- **FR-1.2:** Menampilkan metrik terpisah untuk *Work Orders*, *Actuator Valves*, *Instruments*, dan *Active Findings*.
-- **FR-1.3:** Mendukung perpindahan instan antara **UNIT 1** dan **UNIT 2** melalui tombol toggle di Outage Banner.
-- **FR-1.4:** Menyediakan filter cepat (*Quick Filter Chips*): *Semua Item*, *🚨 Ada Temuan / Foto*, *⏳ In Progress*, dan *☑️ Selesai*.
-- **FR-1.5:** Paginasi data dinamis dengan pilihan ukuran halaman: **20 / hal** *(Default)*, **40 / hal**, dan **Semua Item**.
-
-### 6.2. Manajemen Work Order & Sub-Task
-- **FR-2.1:** Format kartu akordion (*Collapsible Card*) dengan status awal tertutup (*collapsed by default*) saat pertama dimuat.
-- **FR-2.2:** Checklist sub-task interaktif dengan tanggal pelaksanaan otomatis dan badge tipe pekerjaan (*Electrical*, *Instrument*, *Mechanical*, *Testing*).
-- **FR-2.3:** Fitur **Batch Action Sub-Task**: tombol `✓ Selesai Semua` (100% Finish) dan `↺ Reset` (0% Sched-OK).
-- **FR-2.4:** Penambahan sub-task baru secara *Manual*, *Pilih dari Master Actuator*, atau *Pilih dari Master Instrument*.
-- **FR-2.5:** Auto-Fill tanggal selesai (`DD/MM/YYYY`) saat seluruh sub-task selesai 100% dan pengosongan otomatis jika status belum tuntas.
-
-### 6.3. Sinkronisasi Dua Arah Lintas Komponen (*Cross-Component Sync*)
-- **FR-3.1:** Mencocokkan sub-task WO dengan komponen Actuator / Instrument berdasarkan kesamaan Tag KKS dan padanan nama deskripsi (misal: *DRAUGHT* &harr; *DRAFT*, *ID FAN* &harr; *INDUCED DRAUGHT FAN*).
-- **FR-3.2:** Mencentang sub-task actuator/instrument di kartu WO secara instan menyinkronkan status komponen terkait di lembar `ActuatorValve` / `Instrument_*` menjadi `FINISH` (100%) dan mengisi tanggal selesai.
-- **FR-3.3:** Mengubah status pada tab Actuator atau Instrument secara otomatis menyinkronkan checklist sub-task pada kartu Work Order yang bersangkutan.
-
-### 6.4. Pusat Laporan Resmi & Ekspor Multi-Format
-- **FR-4.1:** Menu terpadu **`📑 Report`** di header yang menyajikan 4 opsi laporan resmi:
-  1. *Laporan 1: Progress Harian & Rekap Temuan* (dengan filter rentang tanggal).
-  2. *Laporan 2: Work Order & Sub-Task Lengkap*.
-  3. *Laporan 3: Actuator Valves Matrix*.
-  4. *Laporan 4: Instruments Verification (PTX, TTX, PSW)*.
-- **FR-4.2:** Ekspor file Excel utuh (`.xlsx`) termutakhir secara langsung via tombol **"📥 Unduh Excel"**.
-- **FR-4.3:** Format cetak siap pakai (*Print-Ready Layout*) yang teroptimasi untuk ekspor PDF.
-
-### 6.5. Kurva-S & Analisis Tren Progres
-- **FR-5.1:** Visualisasi grafik Kurva-S interaktif berbasis vektor SVG yang memetakan kumulatif capaian aktual harian terhadap target rencana outage.
-- **FR-5.2:** Tabel rincian harian (*daily breakdown*) pertambahan task selesai per tanggal untuk setiap kategori pekerjaan.
-
-### 6.6. Generator Laporan WhatsApp Ringkas
-- **FR-6.1:** Otomatisasi penyusunan pesan teks berformat WhatsApp yang memuat rekapitulasi persentase progres, daftar pekerjaan selesai hari ini, dan daftar temuan terbuka.
-- **FR-6.2:** Tombol 1-klik **"📋 Salin ke Clipboard"** untuk kenyamanan pelaporan cepat ke grup koordinasi.
-
-### 6.7. Dokumentasi Temuan (*Findings*) & Galeri Foto
-- **FR-7.1:** Modal pencatatan anomali lapangan (`Temuan`) dan rekomendasi perbaikan (`Tindak Lanjut`).
-- **FR-7.2:** Drag-and-drop & file picker multi-foto lapangan yang otomatis tersimpan di folder `Finding/UNIT X/<Nama Item>/`.
-- **FR-7.3:** Lightbox pratinjau foto resolusi penuh dan sinkronisasi jumlah foto ke database Excel.
+| Sheet Name | Purpose | Primary Data Columns |
+| :--- | :--- | :--- |
+| **`WorkOrder`** | Primary WO records | `No`, `No_WO`, `Unit`, `Job_Description`, `Area`, `Schedule_Date`, `Actual_Start_Date`, `Finish_Date`, `Status`, `PIC`, `N_Task`, `Progress_Percent`, `Scope`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
+| **`WorkOrder_Checklist`** | Technical subtask checklists | `No_WO`, `Sub_Task_Description`, `Date`, `PIC_Task`, `Done_TRUE_FALSE`, `Findings`, `Action_Taken`, `Photo_Count` |
+| **`ActuatorValve`** | Motorized actuator valve matrix | `Equipment_ID`, `Area`, `Equipment_Description`, `KKS`, `Unit`, `PIC`, `Status`, `Progress_Percent`, `Finish_Date`, `General_Inspection_TRUE_FALSE`, `Function_Test_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
+| **`Instrument_PressureTX`** | Pressure transmitter calibrations | `No`, `Area`, `Equipment`, `KKS`, `Unit`, `Range`, `Date`, `Finish_Date`, `Done_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
+| **`Instrument_TemperatureTX`** | Temperature transmitter calibrations | `No`, `Area`, `Equipment`, `KKS`, `Unit`, `Range`, `Date`, `Finish_Date`, `Done_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
+| **`Instrument_PressureSwitch`** | Pressure switch set point testing | `No`, `Area`, `Description`, `KKS`, `Unit`, `Sub_Area`, `Set_Point`, `Contact_Type_NO_NC`, `AsFound_Set`, `AsFound_Reset`, `AsLeft_Set`, `AsLeft_Reset`, `Status_OK_NotOK`, `Done_TRUE_FALSE`, `Date`, `Finish_Date`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
+| **`PIC_Scope_Master`** | Job scope & PIC mapping | `Category`, `Equipment_Scope_Name`, `Scope_Type_Vendor_MSW`, `Work_Scope_ME_SI_SE`, `Activity_Description`, `PIC`, `Unit` |
+| **`Dashboard_Summary`** | Automated formula calculations | Formula-based summary (`COUNTIFS`) computing progress percentages |
 
 ---
 
-## 7. Kebutuhan Non-Fungsional (Non-Functional Requirements)
+## 6. Functional Requirements
 
-- **Performance & Latency:** Waktu respons baca/tulis ke file Excel < 1 detik.
-- **UI/UX Excellence:** Desain modern responsif dengan dukungan tema ganda (*Dark Mode* & *Light Mode*) menggunakan palet warna industrial HSL dan tipografi *Inter* & *JetBrains Mono*.
-- **Data Integrity:** Proteksi penulisan dengan file lock untuk mencegah korupsi file spreadsheet.
-- **Ease of Deployment:** Cukup klik dua kali `server.exe` tanpa perlu dependensi Python runtime di komputer klien.
+### 6.1. Real-Time Dashboard & Multi-Unit KPI Monitoring
+- **FR-1.1 Unit Switcher:** Instant toggle between **UNIT 1** and **UNIT 2** with seamless state re-render.
+- **FR-1.2 Grand Progress KPI:** Computes overall outage progress based on completed subtasks across all domains.
+- **FR-1.3 Domain KPI Cards:** Separate visual progress metrics for Work Orders, Actuator Valves, Instruments, and Active Findings.
+- **FR-1.4 Quick Filter Chips:** Instant 1-click filtering: *All Items*, *Active Findings / Photos*, *In Progress*, and *Completed*.
+- **FR-1.5 Dynamic Pagination & Sizing:** Configurable pagination (**20 / page [Default]**, **40 / page**, **All**) with instant silent data refresh.
 
----
+### 6.2. Work Order & Technical Subtask Management
+- **FR-2.1 Collapsible Cards:** Accordion layout with collapsed default state for clear visual hierarchy.
+- **FR-2.2 Interactive Checklists:** Instant check toggling with automatic completion timestamping (`DD/MM/YYYY`).
+- **FR-2.3 Bulk Actions:** `Mark All Done` (sets 100% Finish) and `Reset` (clears checklist to 0% Sched-OK).
+- **FR-2.4 Multi-Mode Subtask Addition:** Add subtasks via *Manual text input*, *Master Actuator picker*, or *Master Instrument picker*.
+- **FR-2.5 Auto Finish Date:** Automatically sets completion date upon 100% checklist completion and clears it if unchecked.
 
-## 8. Riwayat Perubahan & Evolusi Pengembangan Lengkap (Changelog)
+### 6.3. Smart Cross-Component Two-Way Synchronization
+- **FR-3.1 KKS Tag Normalization:** Intelligent matching engine reconciling prefix variations (`10` vs `20`) and technical synonyms (`DRAUGHT` &harr; `DRAFT`, `ID FAN` &harr; `INDUCED DRAUGHT FAN`).
+- **FR-3.2 Bidirectional Propagations:** Checking a valve/instrument subtask in a Work Order automatically advances the corresponding component in `ActuatorValve` or `Instrument_*` sheet to **FINISH (100%)**, and vice-versa.
 
-Berikut adalah catatan riwayat evolusi sistem yang sangat lengkap dari tahap inisiasi awal hingga rilis produksi:
+### 6.4. Master EIC Security & Authorization
+- **FR-4.1 Default Protected State:** Master PIC personnel and Job Scope definitions are locked by default to prevent unauthorized modification.
+- **FR-4.2 Clean Locked Mode:** Edit and delete action controls are completely hidden when locked.
+- **FR-4.3 Password Authorization:** Modal unlock supporting master passwords with interactive SVG eye visibility toggle.
+- **FR-4.4 Safe Lock Mode:** Allows one-click relocking after changes are completed.
 
-### 🔹 Versi 1.5 (30 Agustus 2026) — *Current Production Release*
-- **Paginasi Dinamis:** Mengubah opsi jumlah item per halaman menjadi **20 / hal** *(Default)*, **40 / hal**, dan **Semua**.
-- **Accordion State Initialization:** Menghapus logika auto-expand pada kartu pertama sehingga saat pertama dimuat atau di-refresh, seluruh kartu tertutup rapi (*collapsed by default*).
-- **Interactive Header Logo:** Menambahkan aksi klik pada badge logo `⚡ PLTU MSW EIC` untuk me-refresh halaman seketika.
-- **Dokumentasi Komprehensif:** Pembaruan dokumen `README.md` (GitHub-ready dengan screenshot) dan `PRD_Outage_EIC_WO_Monitoring.md`.
+### 6.5. Official Report Center & PDF Print Layouts
+- **FR-5.1 Dedicated Report Center:** Modal interface providing 4 standardized report templates:
+  1. *Report 1: Daily Progress & Findings Log* (with date range filtering).
+  2. *Report 2: Full Work Orders & Detailed Subtasks*.
+  3. *Report 3: Actuator Valves Inspection Matrix*.
+  4. *Report 4: Field Instruments Calibration (PTX, TTX, PSW)*.
+- **FR-5.2 Direct Excel Export:** Endpoint `/api/export_excel?unit=X` generates live, full-workbook `.xlsx` downloads.
+- **FR-5.3 Print-Optimized Styling:** CSS `@media print` rules ensure clean page breaks, full-width tables, and high-contrast typography.
 
-### 🔹 Versi 1.4 (30 Agustus 2026)
-- **Two-Way Cross-Component Sync:** Mengimplementasikan mesin pencocokan KKS pintar (normalisasi awalan unit `10` vs `20` dan sinonim istilah `DRAUGHT`/`DRAFT`/`ID FAN`) untuk menghubungkan checklist WO dengan lembar Actuator dan Instrument secara real-time.
-- **Instant Background Toggle:** Menghubungkan centang sub-task frontend langsung ke endpoint `/api/quick_toggle_subtask` sehingga perubahan tersimpan ke Excel dan menyinkronkan komponen terkait secara instan tanpa reload.
+### 6.6. S-Curve Trajectory & Progress Analytics
+- **FR-6.1 Mathematical S-Curve Model:** Calculates planned target trajectory using a normalized sigmoid function ($k=7.0$).
+- **FR-6.2 Variance Analytics:** Displays real-time progress variance (`+X% Ahead` or `-X% Behind`).
+- **FR-6.3 Configurable Outage Window:** Dynamic date-picker controls stored in `localStorage` for customized outage schedules.
 
-### 🔹 Versi 1.3 (30 Agustus 2026)
-- **Unit Switcher Relocation:** Memindahkan tombol pemilihan **UNIT 1** dan **UNIT 2** dari header atas ke dalam *Outage Banner* untuk menggantikan badge statis `🔥 Outage Active`.
-- **Header Simplification:** Menyederhanakan sisi kanan header utama agar hanya memuat ikon tema `🌙/☀️` dan tombol `📑 Report`.
+### 6.7. WhatsApp Coordination Briefing Generator
+- **FR-7.1 Structured Message Formatter:** Automatically compiles Grand Progress, Work Orders, Actuators, Instruments, tasks completed today, and open defect findings.
+- **FR-7.2 1-Click Clipboard Copy:** Instant copy button for sharing to team coordination groups.
 
-### 🔹 Versi 1.2 (30 Agustus 2026)
-- **Centered Header Layout:** Menerapkan tata letak CSS Grid 3-kolom (`1fr auto 1fr`) sehingga judul *Outage Work Order Monitoring System* dan subjudul berada tepat di tengah layar.
-- **Label Button Standardization:** Mengubah label tombol laporan menjadi `📑 Report`.
-- **Icon-Only Theme Toggle:** Menghilangkan teks "Dark Mode / Light Mode" sehingga tombol tema menjadi ikon bulat bersih dengan efek hover.
-
-### 🔹 Versi 1.1 (29 Agustus 2026)
-- **Startup Auto-Load Fix:** Menghapus referensi callback `updateSummaryUI` yang sebelumnya menyebabkan kendala data Unit 1 tidak otomatis termuat saat pertama kali dibuka.
-- **WhatsApp Modal Payload Fix:** Memperbaiki pemetaan kunci objek `grand_pct`, `grand_done`, dan `grand_total` pada fungsi `generateWaText()`.
-
-### 🔹 Versi 1.0 (29 Agustus 2026)
-- **Pusat Laporan & Tools Terpadu:** Memindahkan seluruh tombol aksi sekunder (**📈 Kurva-S & Tren**, **📱 Format WA**, dan **📥 Unduh Excel**) ke bagian footer modal Laporan sehingga header aplikasi tetap rapi.
-- **Sticky Summary Bar Integration:** Menyederhanakan tombol aksi pada sticky summary bar dengan tombol pintas `📑 Menu Laporan & Tools`.
-
-### 🔹 Versi 0.9 (29 Agustus 2026)
-- **Implementasi 5 Fitur Unggulan:**
-  1. *Sticky Summary Bar:* Bar ringkasan progres melayang saat scroll > 180px.
-  2. *Floating Back-to-Top Button:* Tombol kembali ke puncak halaman dengan scroll halus.
-  3. *Batch Action Sub-Task:* Tombol `✓ Selesai Semua` dan `↺ Reset` di setiap kartu WO.
-  4. *Live Excel Export:* Endpoint `/api/export_excel?unit=X` untuk mengunduh spreadsheet utuh terkini.
-  5. *Kurva-S & Generator WhatsApp:* Visualisasi grafik SVG progres harian dan generator ringkasan pesan WhatsApp.
-
-### 🔹 Versi 0.8 (29 Agustus 2026)
-- **Comprehensive Daily Report (Opsi 1):** Memperluas cakupan Laporan Harian agar tidak hanya mencatat pembaruan Work Order, tetapi juga mencantumkan aktivitas inspeksi Actuator Valve dan kalibrasi Instrument yang diselesaikan pada tanggal terkait.
-
-### 🔹 Versi 0.7 (29 Agustus 2026)
-- **Automatic Finish Date Synchronization:** Menambahkan logika backend dan frontend untuk otomatis mengisi tanggal hari ini (`DD/MM/YYYY`) sebagai tanggal selesai WO/Actuator/Instrument saat checklist mencapai 100%, dan otomatis mengosongkannya kembali saat ada checklist yang belum tuntas.
-
-### 🔹 Versi 0.6 (29 Agustus 2026)
-- **Actuator Indexing & String Bug Fix:** Memperbaiki pergeseran indeks kolom openpyxl pada handler `save_actuator_update` dan menangani error `(item.status).replace is not a function` dengan safe string wrapper.
-
-### 🔹 Versi 0.5 (29 Agustus 2026)
-- **Dual Theme Support:** Menambahkan switcher Dark Mode / Light Mode berbasis CSS custom properties (`data-theme="light"` / `data-theme="dark"`).
-- **Light Mode UI Fixes:** Memperbaiki kontras teks pada pill Master PIC, date badge, dan kartu laporan saat berada dalam tema terang.
-
-### 🔹 Versi 0.4 (29 Agustus 2026)
-- **Preserve Accordion State:** Mengimplementasikan `openCardIds` state tracking agar kartu yang sedang dibuka tidak tertutup otomatis saat pengguna menekan tombol "Simpan Perubahan".
-
-### 🔹 Versi 0.3 (29 Agustus 2026)
-- **PIC Master Persistence:** Menyeragamkan dropdown PIC di seluruh kartu data dan memperbaiki persistensi pemilihan PIC pada master scope.
-
-### 🔹 Versi 0.2 (29 Agustus 2026)
-- **Initial Backend & SPA Architecture:** Membangun core HTTP Server (`server.py`), REST API (`/api/data`, `/api/update_wo`, dll), openpyxl reader/writer, serta antarmuka monitoring Unit 1 & Unit 2.
-
-### 🔹 Versi 0.1 (29 Agustus 2026)
-- **Initial Draft PRD:** Perumusan spesifikasi kebutuhan unifikasi 4 spreadsheet terpisah ke dalam satu template terpadu.
+### 6.8. Field Evidence & Photo Management
+- **FR-8.1 Defect & Action Logging:** Dual textarea inputs for abnormal findings and recommended corrective action plans.
+- **FR-8.2 Multi-Photo Evidence:** Drag-and-drop file uploader and direct camera capture (`accept="image/*" capture="environment"`).
+- **FR-8.3 Storage & Sync:** Photos saved to `Finding/UNIT X/<Item ID>/` and synchronized with Excel `Photo_Count`.
+- **FR-8.4 Fullscreen Lightbox:** Click-to-enlarge modal for field photo inspections.
 
 ---
 
-## 9. Petunjuk Pengoperasian & Alur Kerja Lapangan
+## 7. Non-Functional Requirements
 
-1. **Memulai Aplikasi:**
-   - Cukup klik ganda file `server.exe` di folder kerja.
-   - Browser akan otomatis terbuka dan menampilkan dashboard monitoring Unit 1.
-2. **Memperbarui Progres Work Order:**
-   - Klik kartu Work Order yang ingin diperbarui.
-   - Centang sub-task yang telah selesai dikerjakan teknisi di lapangan (tanggal selesai akan terisi otomatis).
-   - Klik tombol **`💾 Simpan Perubahan`** jika melakukan perubahan data umum (PIC atau catatan).
-3. **Mencetak Laporan / Mengirim Ringkasan WhatsApp:**
-   - Klik tombol **`📑 Report`** di header atas.
-   - Pilih salah satu dari 4 jenis laporan, sesuaikan tanggal filter jika diperlukan, lalu klik **`🖨️ Cetak / Simpan PDF`**.
-   - Untuk membagikan progres ke grup WhatsApp, klik tombol **`📱 Format WA`** di bagian bawah modal lalu klik **`📋 Salin ke Clipboard`**.
-4. **Melihat Kurva Capaian:**
-   - Klik tombol **`📈 Kurva-S & Tren`** di bagian bawah modal Report untuk melihat grafik kumulatif realisasi vs target harian.
+- **Performance & Latency:** Excel read/write commits execute in $< 500\text{ ms}$.
+- **Data Concurrency:** File locking prevents spreadsheet corruption during simultaneous user access.
+- **Portability & Deployment:** Standalone binary (`server.exe`) runs without external dependencies.
+- **Cross-Device Usability:** Responsive viewport design supporting desktop workstations, laptops, tablets, and smartphones ($360\text{px} - 430\text{px}$).
+
+---
+
+## 8. Design System & Modern Iconography
+
+The interface adheres to modern enterprise SaaS standards:
+
+- **Vector SVG Icons:** Centralized stroke-based SVG icon library (`1.8px` stroke width, `currentColor` theme inheritance) completely replacing legacy OS emojis.
+- **Industrial Color Palette:**
+  - **Primary:** Electric Indigo (`#6366f1` / `#4f46e5`)
+  - **Finish Status:** Emerald Green (`#10b981`)
+  - **In Progress:** Sky Blue (`#38bdf8`)
+  - **Scheduled / Pending:** Slate Gray (`#94a3b8`)
+  - **Alerts / Findings:** Rose Crimson (`#f43f5e`)
+- **Dual Themes:** Clean Dark Mode (default for control rooms) and High-Contrast Light Mode with persistent `localStorage` state.
+- **Typography:** `Inter` for interface elements and `JetBrains Mono` for KKS codes, dates, and numerical metrics.
+
+---
+
+## 9. Complete Changelog & Evolution History
+
+### 🔹 Version 2.0 (September 1, 2026) — *Enterprise Iconography & Full Localization*
+- **Vector SVG Icon System:** Replaced 50+ OS emoji characters with crisp, stroke-based inline SVG icons (Lucide style) across all headers, tabs, cards, tables, buttons, and modals.
+- **100% Full English Localization:** Complete translation of backend API responses, frontend HTML/JS, report templates, and master Excel workbooks (`Template_Outage_EIC_Monitoring_unit 1.xlsx` and `unit 2.xlsx`) across all 8 sheets.
+- **Master EIC Security & Clean Locked Mode:** Added Master Authorization password protection for Scope and Master PIC management. Action buttons are hidden when locked, with an SVG eye toggle for password visibility.
+- **In-Place Silent Data Refresh:** Implemented a silent refresh button beside the pagination indicator, updating data without page reloads or loss of scroll position.
+- **Default Status Scheduled:** Standardized default status for newly created items to `SCHED-OK` (0% progress).
+- **Responsive Mobile Styling:** Enhanced adaptive styling for smartphones and tablets.
+
+### 🔹 Version 1.5 (August 30, 2026)
+- **Dynamic Pagination:** Added page size options (**20 / page**, **40 / page**, **All**).
+- **Accordion Initialization:** Initialized all cards in collapsed state for improved visual hierarchy.
+- **Interactive Header Logo:** Clicking the header logo triggers an instant dashboard reload.
+
+### 🔹 Version 1.4 (August 30, 2026)
+- **Cross-Component Smart Sync:** Implemented intelligent KKS matching connecting Work Order checklists with Actuator and Instrument sheets in real-time.
+- **Instant Background Toggle:** Subtask checkboxes save directly to `/api/quick_toggle_subtask` without full page refresh.
+
+### 🔹 Version 1.0 - 1.3 (August 29–30, 2026)
+- **Centralized Reports Center:** Unified 4 official report formats, S-Curve trends, WhatsApp generator, and Excel download into a dedicated modal.
+- **Unit Switcher Relocation:** Relocated Unit 1 / Unit 2 switchers into the Outage Banner.
+- **Sticky Summary Bar & Back-to-Top:** Added floating progress bar and scroll-to-top button.
+
+### 🔹 Version 0.1 - 0.9 (August 29, 2026)
+- **Initial Architecture:** Built pure Python HTTP server, openpyxl Excel handler, REST endpoints, dual themes, and initial PRD specifications.
+
+---
+
+## 10. Field Operations & Standard Operating Procedures
+
+1. **Starting the System:**
+   - Double-click `server.exe` (or run `start_app.bat`).
+   - The application automatically launches on `http://localhost:8000`.
+2. **Network Access for Field Technicians:**
+   - Connect client smartphones/tablets to the power plant Wi-Fi / LAN network.
+   - Navigate to `http://<SERVER_IP>:8000` (e.g., `http://192.168.1.104:8000`).
+3. **Updating Work Orders & Subtasks:**
+   - Select the target Work Order card to expand the checklist.
+   - Check completed subtasks; completion dates and linked actuator/instrument records sync automatically.
+4. **Logging Field Findings & Photos:**
+   - Click the camera button on any item.
+   - Attach photos, enter defect details and corrective action plans, then save.
+5. **Exporting Reports & WhatsApp Briefings:**
+   - Click **Reports** in the header.
+   - Select the desired report format, adjust date filters, and click **Print / Export PDF** or **WhatsApp Summary**.
 
 ---
 

@@ -28,9 +28,9 @@ def safe_save_workbook(wb, path):
         wb.save(path)
         return True, ""
     except PermissionError:
-        return False, "File Excel sedang dibuka di Microsoft Excel! Silakan tutup file Excel di komputer Anda terlebih dahulu agar aplikasi dapat menyimpan perubahan."
+        return False, "The Excel file is currently open in Microsoft Excel! Please close the Excel file on your computer first so that the application can save changes."
     except Exception as e:
-        return False, f"Gagal menyimpan file Excel: {str(e)}"
+        return False, f"Failed to save Excel file: {str(e)}"
 
 def get_excel_path(unit):
     candidates = [
@@ -131,16 +131,16 @@ def save_add_pic(data):
                             exists = True
                             break
                     if not exists:
-                        ws.append(["A. Master PIC EIC", f"Scope Pekerjaan {pic_name}", "MSW", "ME/SI/SE", "Personil EIC", pic_name, unit])
+                        ws.append(["A. Master PIC EIC", f"Job Scope {pic_name}", "MSW", "ME/SI/SE", "EIC Personnel", pic_name, unit])
                         ok, err = safe_save_workbook(wb, path)
                         if not ok: return {"status": "error", "message": err}
                         
-    return {"status": "success", "message": f"PIC '{pic_name}' berhasil ditambahkan ke Master PIC (Unit 1 & Unit 2)!"}
+    return {"status": "success", "message": f"PIC '{pic_name}' successfully added to Master PIC (Unit 1 & Unit 2)!"}
 
 def save_delete_pic(data):
     pic_name = str(data.get("pic_name", "")).strip()
     if not pic_name:
-        return {"status": "error", "message": "Nama PIC kosong."}
+        return {"status": "error", "message": "PIC name is empty."}
     
     with FILE_LOCK:
         for unit in [1, 2]:
@@ -157,7 +157,7 @@ def save_delete_pic(data):
                         ws.delete_rows(idx, 1)
                     ok, err = safe_save_workbook(wb, path)
                     if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"PIC '{pic_name}' berhasil dihapus dari Master PIC."}
+    return {"status": "success", "message": f"PIC '{pic_name}' successfully deleted from Master PIC."}
 
 def save_scope_update(data):
     unit = data.get("unit", 1)
@@ -182,8 +182,8 @@ def save_scope_update(data):
                 if "tipe_scope" in data and len(target_row) > 2: target_row[2].value = data["tipe_scope"]
                 ok, err = safe_save_workbook(wb, path)
                 if not ok: return {"status": "error", "message": err}
-                return {"status": "success", "message": "Scope Master berhasil diperbarui."}
-    return {"status": "error", "message": "Baris Scope Master tidak ditemukan."}
+                return {"status": "success", "message": "Master Scope updated successfully."}
+    return {"status": "error", "message": "Master Scope row not found."}
 
 def save_delete_scope(data):
     unit = data.get("unit", 1)
@@ -199,8 +199,8 @@ def save_delete_scope(data):
                 ws.delete_rows(idx + 2, 1)
                 ok, err = safe_save_workbook(wb, path)
                 if not ok: return {"status": "error", "message": err}
-                return {"status": "success", "message": "Baris Master Scope berhasil dihapus."}
-    return {"status": "error", "message": "Baris Scope Master tidak ditemukan."}
+                return {"status": "success", "message": "Master Scope row deleted successfully."}
+    return {"status": "error", "message": "Master Scope row not found."}
 
 def save_add_scope(data):
     unit = data.get("unit", 1)
@@ -209,7 +209,7 @@ def save_add_scope(data):
     tipe = str(data.get("tipe_scope", "MSW")).strip()
     pic = normalize_pic(str(data.get("pic", "")).strip()) if data.get("pic") else None
     if not eq:
-        return {"status": "error", "message": "Nama Equipment / Scope wajib diisi."}
+        return {"status": "error", "message": "Equipment / Scope description is required."}
     path = get_excel_path(unit)
     with FILE_LOCK:
         wb = openpyxl.load_workbook(path)
@@ -218,7 +218,8 @@ def save_add_scope(data):
             ws.append([kategori, eq, tipe, "", "", pic, unit])
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
-            return {"status": "success", "message": f"Scope Master '{eq}' berhasil ditambahkan!"}
+            return {"status": "success", "message": f"Master Scope '{eq}' successfully added!"}
+    return {"status": "error", "message": "Sheet PIC_Scope_Master not found."}
     return {"status": "error", "message": "Sheet PIC_Scope_Master tidak ditemukan."}
 
 def save_add_wo(data):
@@ -232,7 +233,7 @@ def save_add_wo(data):
     checklist_str = str(data.get("checklist_str", "")).strip()
     
     if not no_wo or not job_desc:
-        return {"status": "error", "message": "No WO dan Job Description wajib diisi."}
+        return {"status": "error", "message": "WO Number and Job Description are required."}
         
     path = get_excel_path(unit)
     with FILE_LOCK:
@@ -241,7 +242,7 @@ def save_add_wo(data):
             ws = wb["WorkOrder"]
             for r in ws.iter_rows(min_row=2):
                 if r[1].value and str(r[1].value).strip().upper() == no_wo.upper():
-                    return {"status": "error", "message": f"Work Order {no_wo} sudah ada."}
+                    return {"status": "error", "message": f"Work Order {no_wo} already exists."}
             
             max_no = 0
             for r in ws.iter_rows(min_row=2):
@@ -262,7 +263,7 @@ def save_add_wo(data):
             ws.append([max_no + 1, no_wo, unit, job_desc, area, sched, None, None, status, pic, n_task, 0.0, "SUPERVISE, QC", None, None, None, 0])
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"Work Order '{no_wo}' dengan {len(subtasks)} sub-task berhasil ditambahkan!"}
+    return {"status": "success", "message": f"Work Order '{no_wo}' with {len(subtasks)} sub-tasks successfully added!"}
 
 def save_delete_wo(data):
     unit = data.get("unit", 1)
@@ -287,7 +288,7 @@ def save_delete_wo(data):
                 ws_chk.delete_rows(idx, 1)
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"Work Order '{no_wo}' berhasil dihapus."}
+    return {"status": "success", "message": f"Work Order '{no_wo}' successfully deleted."}
 
 def save_add_subtask(data):
     unit = data.get("unit", 1)
@@ -296,7 +297,7 @@ def save_add_subtask(data):
     pic = str(data.get("pic", "")).strip()
     
     if not no_wo or not sub_task:
-        return {"status": "error", "message": "Sub-task description tidak boleh kosong."}
+        return {"status": "error", "message": "Sub-task description cannot be empty."}
         
     path = get_excel_path(unit)
     with FILE_LOCK:
@@ -326,7 +327,7 @@ def save_add_subtask(data):
                     break
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"Sub-task berhasil ditambahkan ke WO {no_wo}!"}
+    return {"status": "success", "message": f"Sub-task successfully added to WO {no_wo}!"}
 
 def save_delete_subtask(data):
     unit = data.get("unit", 1)
@@ -363,7 +364,7 @@ def save_delete_subtask(data):
                     break
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"Sub-task '{sub_task}' berhasil dihapus."}
+    return {"status": "success", "message": f"Sub-task '{sub_task}' successfully deleted."}
 
 
 def extract_kks(text):
@@ -643,7 +644,7 @@ def save_quick_subtask_toggle(data):
 
     return {
         "status": "success",
-        "message": f"Sub-task diperbarui ({new_pct}%)",
+        "message": f"Sub-task updated ({new_pct}%)",
         "persen_progress": new_pct,
         "wo_status": new_status,
         "done_cnt": done_cnt,
@@ -689,7 +690,7 @@ def save_batch_subtask_toggle(data):
 
     return {
         "status": "success",
-        "message": f"Seluruh sub-task WO {no_wo} {'ditandai selesai (100%)' if is_done else 'direset ke awal'}",
+        "message": f"All sub-tasks of WO {no_wo} {'marked as completed (100%)' if is_done else 'reset to initial status'}",
         "persen_progress": new_pct,
         "wo_status": new_status,
         "done_cnt": total_cnt if is_done else 0,
@@ -742,7 +743,7 @@ def save_quick_actuator_toggle(data):
 
     return {
         "status": "success",
-        "message": f"Actuator {eq_id} diperbarui ({new_pct}%)",
+        "message": f"Actuator {eq_id} updated ({new_pct}%)",
         "persen_progress": new_pct,
         "act_status": new_status
     }
@@ -790,7 +791,7 @@ def save_quick_instrument_toggle(data):
 
     return {
         "status": "success",
-        "message": f"Status instrumen diperbarui ke {'DONE' if status_wdone else 'SCHEDULED'}",
+        "message": f"Instrument status updated to {'DONE' if status_wdone else 'SCHEDULED'}",
         "status_wdone": status_wdone
     }
 
@@ -813,7 +814,7 @@ def save_add_actuator(data):
             ws.append([eq_id, area, desc, kks, unit, pic, "SCHED-OK", 0, None, False, False, None, None, None, 0])
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"Actuator Valve '{eq_id}' berhasil ditambahkan!"}
+    return {"status": "success", "message": f"Actuator Valve '{eq_id}' successfully added!"}
 
 def save_delete_actuator(data):
     unit = data.get("unit", 1)
@@ -830,7 +831,7 @@ def save_delete_actuator(data):
                     break
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"Actuator '{eq_id}' berhasil dihapus."}
+    return {"status": "success", "message": f"Actuator '{eq_id}' successfully deleted."}
 
 def save_bulk_instrument_update(data):
     unit = data.get("unit", 1)
@@ -839,7 +840,7 @@ def save_bulk_instrument_update(data):
     path = get_excel_path(unit)
     
     if not items:
-        return {"status": "error", "message": "Tidak ada instrumen yang dipilih."}
+        return {"status": "error", "message": "No instruments selected."}
         
     with FILE_LOCK:
         wb = openpyxl.load_workbook(path)
@@ -880,8 +881,8 @@ def save_bulk_instrument_update(data):
         ok, err = safe_save_workbook(wb, path)
         if not ok: return {"status": "error", "message": err}
         
-    action_str = "SELESAI (DONE)" if status_wdone else "SCHEDULED"
-    return {"status": "success", "message": f"Berhasil memperbarui {updated_count} instrumen menjadi {action_str}!"}
+    action_str = "FINISHED (DONE)" if status_wdone else "SCHEDULED"
+    return {"status": "success", "message": f"Successfully updated {updated_count} instruments to {action_str}!"}
 
 def save_add_instrument(data):
     unit = data.get("unit", 1)
@@ -895,7 +896,7 @@ def save_add_instrument(data):
     rng = str(data.get("range", "")).strip()
     
     if not eq:
-        return {"status": "error", "message": "Nama Equipment wajib diisi."}
+        return {"status": "error", "message": "Equipment description is required."}
         
     path = get_excel_path(unit)
     with FILE_LOCK:
@@ -919,7 +920,7 @@ def save_add_instrument(data):
                 ws.append([max_no, area, eq, kks, unit, rng or set_point, None, False, None, None, None, 0, False])
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": f"Instrument '{eq}' berhasil ditambahkan!"}
+    return {"status": "success", "message": f"Instrument '{eq}' successfully added!"}
 
 def save_delete_instrument(data):
     unit = data.get("unit", 1)
@@ -949,12 +950,12 @@ def save_delete_instrument(data):
                     break
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
-    return {"status": "success", "message": "Instrument berhasil dihapus."}
+    return {"status": "success", "message": "Instrument successfully deleted."}
 
 def load_unit_data(unit):
     path = get_excel_path(unit)
     if not os.path.exists(path):
-        return {"error": f"File Excel untuk Unit {unit} tidak ditemukan: {os.path.basename(path)}"}
+        return {"error": f"Excel template file for Unit {unit} not found: {os.path.basename(path)}"}
     
     with FILE_LOCK:
         wb = openpyxl.load_workbook(path, data_only=True)
@@ -1522,7 +1523,7 @@ def handle_finding_photo_save(data):
             with open(os.path.join(finding_dir, dest_filename), "wb") as img_file:
                 img_file.write(img_data)
         except Exception as e:
-            return {"status": "error", "message": f"Gagal memproses gambar: {str(e)}"}
+            return {"status": "error", "message": f"Failed to process image: {str(e)}"}
 
     elif photo_source_path and os.path.exists(photo_source_path):
         ext = os.path.splitext(photo_source_path)[1] or ".jpg"
@@ -1542,7 +1543,7 @@ def handle_finding_photo_save(data):
 
     return {
         "status": "success",
-        "message": "Foto dan catatan temuan berhasil disimpan!",
+        "message": "Photo and field findings saved successfully!",
         "jumlah_foto": num_photos,
         "folder": folder_name,
         "photos": [{"filename": p, "url": f"/findings_media/{folder_name}/{p}"} for p in sorted(photo_files)]
@@ -1575,7 +1576,7 @@ def handle_finding_photo_delete(data):
 
     return {
         "status": "success",
-        "message": "Foto berhasil dihapus.",
+        "message": "Photo deleted successfully.",
         "jumlah_foto": num_photos,
         "photos": [{"filename": p, "url": f"/findings_media/{folder_name}/{p}"} for p in sorted(photo_files)]
     }
@@ -1662,7 +1663,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
                     file_bytes = f.read()
             self.send_response(200)
             today_fn = datetime.date.today().strftime("%Y%m%d")
-            filename = f"Laporan_Monitoring_Outage_EIC_Unit_{unit}_{today_fn}.xlsx"
+            filename = f"Outage_EIC_Monitoring_Report_Unit_{unit}_{today_fn}.xlsx"
             self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(len(file_bytes)))
@@ -2388,7 +2389,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             .sticky-summary-bar { padding: 10px 18px; }
         }
 
-        /* 📱 Smartphone Adaptive Styling (6" - 7" Screens & Viewports 360px - 430px) */
+        /* Smartphone Adaptive Styling (6" - 7" Screens & Viewports 360px - 430px) */
         @media (max-width: 640px) {
             body {
                 padding-bottom: calc(75px + var(--safe-bottom));
@@ -3132,26 +3133,55 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             border-color: #f43f5e !important;
         }
 
+        .ui-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: -0.125em;
+            width: 1em;
+            height: 1em;
+            stroke-width: 1.8;
+            stroke: currentColor;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            flex-shrink: 0;
+        }
+        .ui-icon.sm { width: 14px; height: 14px; }
+        .ui-icon.md { width: 16px; height: 16px; }
+        .ui-icon.lg { width: 20px; height: 20px; }
+        .stat-title-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
     </style>
 </head>
 <body>
     <!-- Sticky Summary Bar -->
     <div id="sticky-summary-bar" class="sticky-summary-bar">
         <div class="sticky-stats-group">
-            <span class="sticky-stat-pill" style="color:var(--primary); font-family:'JetBrains Mono';">⚡ UNIT <span id="sticky-unit-num">1</span></span>
+            <span class="sticky-stat-pill" style="color:var(--primary); font-family:'JetBrains Mono'; font-weight:800;">UNIT <span id="sticky-unit-num">1</span></span>
             <span class="sticky-stat-pill">Total: <strong style="color:var(--primary);" id="sticky-grand-pct">0%</strong></span>
-            <span class="sticky-stat-pill">📋 WO: <strong id="sticky-wo-pct">0%</strong></span>
-            <span class="sticky-stat-pill">⚙️ Valve: <strong id="sticky-act-pct">0%</strong></span>
-            <span class="sticky-stat-pill">🎛️ Inst: <strong id="sticky-inst-pct">0%</strong></span>
+            <span class="sticky-stat-pill">WO: <strong id="sticky-wo-pct">0%</strong></span>
+            <span class="sticky-stat-pill">Valves: <strong id="sticky-act-pct">0%</strong></span>
+            <span class="sticky-stat-pill">Inst: <strong id="sticky-inst-pct">0%</strong></span>
         </div>
         <div class="sticky-actions-group">
-            <button class="sticky-action-btn" onclick="openReportModal()">📑 Menu Laporan & Tools</button>
-            <button class="sticky-action-btn" onclick="scrollToTop()">▲ Atas</button>
+            <button class="sticky-action-btn" onclick="openReportModal()" style="display:inline-flex; align-items:center; gap:5px;">
+                <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Reports & Export
+            </button>
+            <button class="sticky-action-btn" onclick="scrollToTop()" style="display:inline-flex; align-items:center; gap:4px;">
+                <svg class="ui-icon sm" viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg> Top
+            </button>
         </div>
     </div>
 
     <!-- Floating Back to Top Button -->
-    <button id="back-to-top-btn" class="back-to-top-btn" onclick="scrollToTop()" title="Kembali ke Atas">▲</button>
+    <button id="back-to-top-btn" class="back-to-top-btn" onclick="scrollToTop()" title="Back to Top">
+        <svg class="ui-icon md" viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+    </button>
     <!-- Toast Notification Container -->
     <div id="toast-container"></div>
 
@@ -3165,7 +3195,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="modal-content">
             <div class="modal-header">
                 <div>
-                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800;" id="modal-finding-title">📷 Bukti Lapangan & Temuan</h3>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;" id="modal-finding-title">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                        Field Findings & Photos
+                    </h3>
                     <div style="font-size:0.8rem; color:var(--text-muted);" id="modal-finding-subtitle">Equipment Code</div>
                 </div>
                 <button class="modal-close" onclick="closeFindingModal()">&times;</button>
@@ -3173,12 +3206,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             <!-- Upload Dropzone -->
             <div class="photo-dropzone" id="photo-dropzone">
-                <div style="font-size:1.8rem; margin-bottom:4px;">📸</div>
-                <strong style="color:var(--primary); font-size:0.9rem;">Unggah Bukti Foto Lapangan</strong>
-                <p style="font-size:0.78rem; color:var(--text-muted); margin:4px 0 10px 0;">Mendukung multi-foto (JPG, PNG, WebP). Otomatis tersimpan ke folder <code>Finding/</code> & disinkronkan ke Excel.</p>
+                <div style="margin-bottom:6px;">
+                    <svg class="ui-icon" style="width:34px; height:34px; color:var(--primary); opacity:0.85;" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                </div>
+                <strong style="color:var(--primary); font-size:0.9rem;">Upload Field Photo Documentation</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin:4px 0 10px 0;">Supports multiple photos (JPG, PNG, WebP). Automatically saved to <code>Finding/</code> folder and synced with Excel.</p>
                 <div style="display:flex; justify-content:center; gap:8px; flex-wrap:wrap;">
-                    <button type="button" class="btn-save" style="padding:7px 14px; font-size:0.8rem;" onclick="document.getElementById('camera-input-modal').click()">📷 Kamera Langsung</button>
-                    <button type="button" class="page-btn" style="padding:7px 14px; font-size:0.8rem;" onclick="document.getElementById('file-input-modal').click()">📁 Pilih dari Galeri</button>
+                    <button type="button" class="btn-save" style="padding:7px 14px; font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" onclick="document.getElementById('camera-input-modal').click()">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg> Take Photo
+                    </button>
+                    <button type="button" class="page-btn" style="padding:7px 14px; font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" onclick="document.getElementById('file-input-modal').click()">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Select Files
+                    </button>
                 </div>
                 <input type="file" id="file-input-modal" accept="image/*" multiple style="display:none;" onchange="handleModalFileSelect(this.files)">
                 <input type="file" id="camera-input-modal" accept="image/*" capture="environment" style="display:none;" onchange="handleModalFileSelect(this.files)">
@@ -3186,25 +3225,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             <!-- Photo Gallery Grid -->
             <div id="modal-photos-container">
-                <div style="font-size:0.82rem; font-weight:700; color:var(--text-muted); margin-bottom:8px;">Galeri Foto Tersimpan (<span id="modal-photo-count">0</span>):</div>
+                <div style="font-size:0.82rem; font-weight:700; color:var(--text-muted); margin-bottom:8px;">Saved Photos (<span id="modal-photo-count">0</span>):</div>
                 <div class="photo-grid" id="modal-photo-grid"></div>
             </div>
 
             <!-- Finding & Follow-up Text -->
             <div class="form-grid" style="margin-top:16px;">
                 <div class="form-group">
-                    <label>📝 Temuan Lapangan / Kerusakan</label>
-                    <textarea id="modal-finding-text" class="textarea-full" placeholder="Deskripsikan temuan kondisi abnormal, keausan, kebocoran, atau deviasi..."></textarea>
+                    <label>Field Finding / Defect Details</label>
+                    <textarea id="modal-finding-text" class="textarea-full" placeholder="Describe abnormal conditions, wear, leaks, or calibration deviations..."></textarea>
                 </div>
                 <div class="form-group">
-                    <label>🛠️ Tindak Lanjut / Rekomendasi</label>
-                    <textarea id="modal-tl-text" class="textarea-full" placeholder="Rencana perbaikan, penggantian part, kalibrasi ulang, dll..."></textarea>
+                    <label>Corrective Action Plan / Recommendations</label>
+                    <textarea id="modal-tl-text" class="textarea-full" placeholder="Repair plans, spare part replacements, recalibration actions..."></textarea>
                 </div>
             </div>
 
             <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px; border-top:1px solid var(--border-color); padding-top:14px;">
-                <button class="page-btn" onclick="closeFindingModal()">Tutup</button>
-                <button class="btn-save" onclick="saveFindingModalData()">💾 Simpan Temuan & Foto</button>
+                <button class="page-btn" onclick="closeFindingModal()">Close</button>
+                <button class="btn-save" onclick="saveFindingModalData()" style="display:inline-flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Findings & Photos
+                </button>
             </div>
         </div>
     </div>
@@ -3214,29 +3255,34 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="modal-content" style="max-width: 1050px; max-height: 92vh; display: flex; flex-direction: column;">
             <div class="modal-header" style="flex-shrink: 0;">
                 <div>
-                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800;" id="report-modal-title">📑 Pusat Laporan & Cetak Outage EIC</h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Pilih salah satu dari 4 opsi laporan resmi untuk diekspor dan dicetak ke PDF (Unit 1 & 2).</div>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;" id="report-modal-title">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                        Outage EIC Report & Print Center
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Select one of 4 official report formats to export and print to PDF (Unit 1 & 2).</div>
                 </div>
                 <button class="modal-close" onclick="closeReportModal()">&times;</button>
             </div>
 
             <!-- 4 Report Option Selector Tabs -->
             <div class="report-type-selector" style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; flex-shrink:0;">
-                <button class="unit-btn active" id="reptab-harian" onclick="setReportType('harian')">📅 1. Progress Harian & Temuan</button>
-                <button class="unit-btn" id="reptab-wo_detail" onclick="setReportType('wo_detail')">📋 2. WO & Sub-Task Lengkap</button>
-                <button class="unit-btn" id="reptab-actuator" onclick="setReportType('actuator')">⚙️ 3. Actuator Valves</button>
-                <button class="unit-btn" id="reptab-instruments" onclick="setReportType('instruments')">🎛️ 4. Instruments (TX & PSW)</button>
+                <button class="unit-btn active" id="reptab-harian" onclick="setReportType('harian')">1. Daily Progress & Findings</button>
+                <button class="unit-btn" id="reptab-wo_detail" onclick="setReportType('wo_detail')">2. Full WO & Sub-Tasks</button>
+                <button class="unit-btn" id="reptab-actuator" onclick="setReportType('actuator')">3. Actuator Valves</button>
+                <button class="unit-btn" id="reptab-instruments" onclick="setReportType('instruments')">4. Instruments (TX & PSW)</button>
             </div>
 
             <!-- Date Range Filter Bar for Harian Report -->
             <div id="report-date-bar" style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; background:var(--bg-sub); padding:10px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:14px; flex-shrink: 0;">
-                <span style="font-size:0.82rem; font-weight:700; color:var(--text-main);">📅 Periode Task:</span>
+                <span style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Task Period:</span>
                 <input type="date" id="report-start-date" class="filter-input" style="padding:5px 10px; font-size:0.82rem;">
-                <span style="font-size:0.82rem; color:var(--text-muted);">s/d</span>
+                <span style="font-size:0.82rem; color:var(--text-muted);">to</span>
                 <input type="date" id="report-end-date" class="filter-input" style="padding:5px 10px; font-size:0.82rem;">
-                <button class="page-btn" style="padding:5px 12px; font-size:0.8rem;" onclick="generateReportContent()">🔄 Terapkan Filter</button>
+                <button class="page-btn" style="padding:5px 12px; font-size:0.8rem;" onclick="generateReportContent()">Apply Filter</button>
                 <div style="margin-left:auto; display:flex; gap:8px;">
-                    <button class="btn-save" style="padding:6px 16px; font-size:0.85rem;" onclick="printReportModal()">🖨️ Cetak / Simpan PDF</button>
+                    <button class="btn-save" style="padding:6px 16px; font-size:0.85rem; display:inline-flex; align-items:center; gap:6px;" onclick="printReportModal()">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print / Export PDF
+                    </button>
                 </div>
             </div>
 
@@ -3249,13 +3295,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px; flex-shrink: 0;">
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button class="page-btn" onclick="openSCurveModal()" style="font-weight:700;">📈 Kurva-S & Tren</button>
-                    <button class="page-btn" onclick="openWaSummaryModal()" style="font-weight:700; color:#10b981; border-color:rgba(16,185,129,0.4);">📱 Format WA</button>
-                    <button class="page-btn" onclick="downloadExcel()" style="color:var(--primary); font-weight:700;">📥 Unduh Excel (.xlsx)</button>
+                    <button class="page-btn" onclick="openSCurveModal()" style="font-weight:700; display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg> S-Curve & Trends
+                    </button>
+                    <button class="page-btn" onclick="openWaSummaryModal()" style="font-weight:700; color:#10b981; border-color:rgba(16,185,129,0.4); display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg> WhatsApp Summary
+                    </button>
+                    <button class="page-btn" onclick="downloadExcel()" style="color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Excel (.xlsx)
+                    </button>
                 </div>
                 <div style="display:flex; gap:8px;">
-                    <button class="page-btn" onclick="closeReportModal()">Tutup</button>
-                    <button class="btn-save" onclick="printReportModal()">🖨️ Cetak / Simpan PDF</button>
+                    <button class="page-btn" onclick="closeReportModal()">Close</button>
+                    <button class="btn-save" onclick="printReportModal()" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print / Export PDF
+                    </button>
                 </div>
             </div>
         </div>
@@ -3266,8 +3320,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="modal-content" style="max-width: 880px; max-height: 90vh; display: flex; flex-direction: column;">
             <div class="modal-header" style="margin-bottom: 12px;">
                 <div>
-                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800;">📈 Kurva-S & Tren Progress Outage Unit <span id="scurve-unit-label">1</span></h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Grafik visual pencapaian kumulatif dan tren task harian (Work Order, Valve, & Instrumen).</div>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                        S-Curve & Progress Trends Unit <span id="scurve-unit-label">1</span>
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Cumulative progress trajectory and daily completion trends (Work Orders, Valves, & Instruments).</div>
                 </div>
                 <button class="modal-close" onclick="closeSCurveModal()">&times;</button>
             </div>
@@ -3275,11 +3332,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <!-- Outage Schedule Range Control Bar -->
             <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; background:var(--bg-sub); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:12px; flex-shrink:0;">
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <span style="font-size:0.82rem; font-weight:700; color:var(--text-main);">📅 Periode Outage:</span>
-                    <input type="date" id="scurve-start-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Tanggal Mulai Outage">
-                    <span style="font-size:0.8rem; color:var(--text-muted);">s/d</span>
-                    <input type="date" id="scurve-end-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Target Selesai Outage">
-                    <button class="page-btn" style="padding:4px 12px; font-size:0.8rem; font-weight:700;" onclick="renderSCurveChart()">🔄 Hitung Kurva-S</button>
+                    <span style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Outage Period:</span>
+                    <input type="date" id="scurve-start-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Start Date">
+                    <span style="font-size:0.8rem; color:var(--text-muted);">to</span>
+                    <input type="date" id="scurve-end-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Target Date">
+                    <button class="page-btn" style="padding:4px 12px; font-size:0.8rem; font-weight:700;" onclick="renderSCurveChart()">Calculate S-Curve</button>
                 </div>
                 <div id="scurve-kpi-badge" style="display:flex; align-items:center; gap:6px; font-size:0.8rem; font-weight:700;"></div>
             </div>
@@ -3288,7 +3345,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div id="scurve-chart-container"></div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px; flex-shrink:0;">
-                <button class="page-btn" onclick="closeSCurveModal()">Tutup</button>
+                <button class="page-btn" onclick="closeSCurveModal()">Close</button>
             </div>
         </div>
     </div>
@@ -3298,8 +3355,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="modal-content" style="max-width: 680px; max-height: 90vh; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <div>
-                    <h3 style="color:#10b981; font-size:1.15rem; font-weight:800;">📱 Generator Ringkasan WhatsApp</h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Format laporan pesan singkat terstruktur untuk dikirimkan ke grup koordinasi WhatsApp.</div>
+                    <h3 style="color:#10b981; font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                        WhatsApp Summary Generator
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Structured summary message format formatted for team WhatsApp coordination.</div>
                 </div>
                 <button class="modal-close" onclick="closeWaSummaryModal()">&times;</button>
             </div>
@@ -3307,9 +3367,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <textarea id="wa-text-box" class="wa-box" style="width:100%; height:320px; resize:vertical; font-family:'JetBrains Mono', monospace; font-size:0.82rem;" readonly></textarea>
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px;">
-                <button class="page-btn" onclick="closeWaSummaryModal()">Tutup</button>
+                <button class="page-btn" onclick="closeWaSummaryModal()">Close</button>
                 <div style="display:flex; gap:8px;">
-                    <button class="btn-save" onclick="copyWaText()" style="background:#10b981;">📋 Salin ke Clipboard</button>
+                    <button class="btn-save" onclick="copyWaText()" style="background:#10b981; display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg> Copy to Clipboard
+                    </button>
                 </div>
             </div>
         </div>
@@ -3321,26 +3383,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="modal-header" style="margin-bottom: 14px;">
                 <div>
                     <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
-                        🔐 Otorisasi Master EIC
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        Master EIC Authorization
                     </h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Masukkan password otorisasi untuk membuka akses edit Master PIC & Scope.</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Enter master authorization password to unlock Master PIC & Scope editing.</div>
                 </div>
                 <button class="modal-close" onclick="closeMasterPasswordModal()">&times;</button>
             </div>
             
             <form onsubmit="submitMasterPassword(event)" style="margin-top: 10px;">
                 <div class="form-group" style="margin-bottom: 14px;">
-                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Password Master:</label>
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Master Password:</label>
                     <div style="position:relative; display:flex; align-items:center;">
-                        <input type="password" id="master-pwd-input" class="filter-input" placeholder="Masukkan password master..." style="width:100%; padding:10px 38px 10px 12px; font-size:0.95rem; font-family:'Inter', sans-serif;" autocomplete="current-password">
-                        <button type="button" onclick="toggleMasterPwdVisibility()" style="position:absolute; right:10px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1rem;" title="Lihat / Sembunyikan Password">👁️</button>
+                        <input type="password" id="master-pwd-input" class="filter-input" placeholder="Enter master password..." style="width:100%; padding:10px 38px 10px 12px; font-size:0.95rem; font-family:'Inter', sans-serif;" autocomplete="current-password">
+                        <button type="button" onclick="toggleMasterPwdVisibility()" style="position:absolute; right:10px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1rem; display:flex; align-items:center;" title="Show / Hide Password" id="pwd-eye-btn">
+                            <svg class="ui-icon md" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
                     </div>
-                    <div id="master-pwd-error" style="color:#f43f5e; font-size:0.78rem; font-weight:700; margin-top:6px; display:none;">❌ Password salah! Silakan coba lagi.</div>
+                    <div id="master-pwd-error" style="color:#f43f5e; font-size:0.78rem; font-weight:700; margin-top:6px; display:none;">Incorrect password! Please try again.</div>
                 </div>
                 
                 <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
-                    <button type="button" class="page-btn" onclick="closeMasterPasswordModal()">Batal</button>
-                    <button type="submit" class="btn-save" style="padding:9px 20px;">🔓 Buka Akses Edit</button>
+                    <button type="button" class="page-btn" onclick="closeMasterPasswordModal()">Cancel</button>
+                    <button type="submit" class="btn-save" style="padding:9px 20px; display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> Unlock Edit Access
+                    </button>
                 </div>
             </form>
         </div>
@@ -3349,17 +3416,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Header -->
     <header>
         <div class="logo-area">
-            <div class="logo-badge" onclick="window.location.reload()" title="🔄 Klik untuk Refresh Halaman">⚡ PLTU MSW EIC</div>
+            <div class="logo-badge" onclick="window.location.reload()" title="Click to Reload Page" style="display:inline-flex; align-items:center; gap:6px;">
+                <svg class="ui-icon sm" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                PLTU MSW EIC
+            </div>
         </div>
         <div class="title-group">
             <h1>Outage Work Order Monitoring System</h1>
             <p>Section Electric, Instrument & Control &bull; Real-Time Dashboard</p>
         </div>
         <div class="header-controls">
-            <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Ganti Tema Terang / Gelap">
-                <span id="theme-icon" style="font-size:1.1rem; line-height:1;">🌙</span>
+            <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Light / Dark Mode">
+                <span id="theme-icon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
             </button>
-            <button class="btn-print" onclick="openReportModal()" title="Buka Report / Export PDF">📑 Report</button>
+            <button class="btn-print" onclick="openReportModal()" title="Open Reports / Export PDF" style="display:inline-flex; align-items:center; gap:6px;">
+                <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Reports
+            </button>
         </div>
     </header>
 
@@ -3373,16 +3445,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <button class="unit-btn" id="btn-unit-2" onclick="switchUnit(2)">UNIT 2</button>
                 </div>
                 <div>
-                    <div class="outage-title" id="outage-unit-title">Monitoring Progress Outage EIC Unit 1</div>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Terintegrasi otomatis dengan Template Excel & Folder Temuan</div>
+                    <div class="outage-title" id="outage-unit-title">Outage EIC Monitoring Progress Unit 1</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Seamlessly synchronized with Excel Templates & Findings Media</div>
                 </div>
             </div>
             <div class="outage-progress-box">
                 <div class="outage-pct-huge" id="grand-pct">0%</div>
                 <div class="outage-bar-wrap">
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:0.78rem; font-weight:700; margin-bottom:4px; white-space:nowrap;">
-                        <span>Total Selesai: </span>
-                        <span id="grand-counts">0 / 0 Item</span>
+                        <span>Total Completed: </span>
+                        <span id="grand-counts">0 / 0 Items</span>
                     </div>
                     <div class="outage-bar-bg"><div class="outage-bar-fill" id="grand-bar-fill" style="width:0%;"></div></div>
                 </div>
@@ -3393,27 +3465,47 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="dashboard-main-layout">
             <!-- Left Column / Sidebar: KPI Stats Cards -->
             <aside class="sidebar-stats">
-                <div class="sidebar-section-title">📊 Status Progress</div>
+                <div class="sidebar-section-title">Progress Status</div>
                 <div class="stats-vertical-list">
-                    <div class="stat-card" onclick="switchTab('wo')" title="Klik untuk lihat Work Orders">
-                        <div class="stat-title">📋 Work Orders (WO)</div>
+                    <div class="stat-card" onclick="switchTab('wo')" title="Click to view Work Orders">
+                        <div class="stat-title">
+                            <span class="stat-title-wrap">
+                                <svg class="ui-icon sm" style="color:var(--primary);" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+                                Work Orders (WO)
+                            </span>
+                        </div>
                         <div class="stat-value"><span id="wo-pct">0%</span> <span style="font-size:0.85rem; color:var(--text-muted);" id="wo-counts">0 / 0</span></div>
                         <div class="stat-sub" id="wo-sub">Finish: 0 | In-Progress: 0</div>
                     </div>
-                    <div class="stat-card finish" onclick="switchTab('actuator')" title="Klik untuk lihat Actuator Valves">
-                        <div class="stat-title">⚙️ Actuator Valves</div>
+                    <div class="stat-card finish" onclick="switchTab('actuator')" title="Click to view Actuator Valves">
+                        <div class="stat-title">
+                            <span class="stat-title-wrap">
+                                <svg class="ui-icon sm" style="color:var(--status-finish);" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                                Actuator Valves
+                            </span>
+                        </div>
                         <div class="stat-value"><span id="act-pct">0%</span> <span style="font-size:0.85rem; color:var(--text-muted);" id="act-counts">0 / 0</span></div>
                         <div class="stat-sub" id="act-sub">Finish: 0 | In-Progress: 0</div>
                     </div>
-                    <div class="stat-card inprog" onclick="switchTab('instrument')" title="Klik untuk lihat Instruments">
-                        <div class="stat-title">🎛️ Instruments</div>
+                    <div class="stat-card inprog" onclick="switchTab('instrument')" title="Click to view Instruments">
+                        <div class="stat-title">
+                            <span class="stat-title-wrap">
+                                <svg class="ui-icon sm" style="color:var(--status-inprog);" viewBox="0 0 24 24"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>
+                                Instruments
+                            </span>
+                        </div>
                         <div class="stat-value"><span id="inst-pct">0%</span> <span style="font-size:0.85rem; color:var(--text-muted);" id="inst-counts">0 / 0</span></div>
                         <div class="stat-sub" id="inst-sub">PTX: 0 | TTX: 0 | PSW: 0</div>
                     </div>
-                    <div class="stat-card findings" onclick="setQuickFilter('findings')" title="Klik untuk filter temuan">
-                        <div class="stat-title">🚨 Temuan (Findings)</div>
+                    <div class="stat-card findings" onclick="setQuickFilter('findings')" title="Click to filter logged findings">
+                        <div class="stat-title">
+                            <span class="stat-title-wrap">
+                                <svg class="ui-icon sm" style="color:var(--status-alert);" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                Active Findings
+                            </span>
+                        </div>
                         <div class="stat-value" id="findings-count" style="color:var(--status-alert);">0</div>
-                        <div class="stat-sub">Item dengan temuan/foto tercatat</div>
+                        <div class="stat-sub">Items with logged findings/photos</div>
                     </div>
                 </div>
             </aside>
@@ -3422,52 +3514,74 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <main class="main-content-panel">
                 <!-- Main Navigation Tabs -->
                 <div class="nav-tabs">
-                    <button class="tab-btn active" onclick="switchTab('wo')">📋 Work Orders <span class="tab-count" id="tab-cnt-wo">0</span></button>
-                    <button class="tab-btn" onclick="switchTab('actuator')">⚙️ Actuator Valves <span class="tab-count" id="tab-cnt-act">0</span></button>
-                    <button class="tab-btn" onclick="switchTab('instrument')">🎛️ Instruments <span class="tab-count" id="tab-cnt-inst">0</span></button>
-                    <button class="tab-btn" onclick="switchTab('scope')">👥 Scope & PIC Master</button>
+                    <button class="tab-btn active" onclick="switchTab('wo')" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+                        Work Orders <span class="tab-count" id="tab-cnt-wo">0</span>
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('actuator')" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                        Actuator Valves <span class="tab-count" id="tab-cnt-act">0</span>
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('instrument')" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>
+                        Instruments <span class="tab-count" id="tab-cnt-inst">0</span>
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('scope')" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                        Scope & Master EIC
+                    </button>
                 </div>
 
                 <!-- Filter & Control Toolbar -->
                 <div class="filter-toolbar">
                     <div class="filter-top-row">
-                        <input type="text" id="search-input" class="filter-input search" placeholder="🔍 Cari WO, No KKS, Equipment, PIC, atau Catatan..." oninput="applyFilters()">
+                        <input type="text" id="search-input" class="filter-input search" placeholder="Search WO, KKS, Equipment, Area, Findings, or PIC..." oninput="applyFilters()">
                         <select id="filter-status" class="filter-input" onchange="applyFilters()">
-                            <option value="">Semua Status</option>
+                            <option value="">All Statuses</option>
                             <option value="FINISH">FINISH</option>
                             <option value="IN PROGRESS">IN PROGRESS</option>
                             <option value="SCHED-OK">SCHED-OK</option>
                         </select>
                         <select id="filter-pic" class="filter-input" onchange="applyFilters()">
-                            <option value="">Semua PIC</option>
+                            <option value="">All PICs</option>
                         </select>
                         <select id="filter-area" class="filter-input" onchange="applyFilters()">
-                            <option value="">Semua Area</option>
+                            <option value="">All Areas</option>
                         </select>
 
                         <div class="view-switcher" id="view-switcher-box">
-                            <button class="view-btn active" id="btn-view-cards" onclick="switchViewMode('cards')">🗂️ Cards</button>
-                            <button class="view-btn" id="btn-view-table" onclick="switchViewMode('table')">📊 Table</button>
+                            <button class="view-btn active" id="btn-view-cards" onclick="switchViewMode('cards')" style="display:inline-flex; align-items:center; gap:5px;">
+                                <svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg> Cards
+                            </button>
+                            <button class="view-btn" id="btn-view-table" onclick="switchViewMode('table')" style="display:inline-flex; align-items:center; gap:5px;">
+                                <svg class="ui-icon sm" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg> Table
+                            </button>
                         </div>
                     </div>
 
                     <!-- Quick Filter Chips & Side Item Counter -->
                     <div class="filter-pills" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                            <button class="pill-btn active" id="pill-all" onclick="setQuickFilter('all')">Semua Item</button>
-                            <button class="pill-btn" id="pill-findings" onclick="setQuickFilter('findings')">🚨 Ada Temuan / Foto</button>
-                            <button class="pill-btn" id="pill-inprog" onclick="setQuickFilter('inprog')">⏳ In Progress</button>
-                            <button class="pill-btn" id="pill-finish" onclick="setQuickFilter('finish')">☑️ Selesai</button>
+                            <button class="pill-btn active" id="pill-all" onclick="setQuickFilter('all')">All Items</button>
+                            <button class="pill-btn" id="pill-findings" onclick="setQuickFilter('findings')" style="display:inline-flex; align-items:center; gap:5px;">
+                                <svg class="ui-icon sm" style="color:var(--status-alert);" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                Active Findings / Photos
+                            </button>
+                            <button class="pill-btn" id="pill-inprog" onclick="setQuickFilter('inprog')">In Progress</button>
+                            <button class="pill-btn" id="pill-finish" onclick="setQuickFilter('finish')">Completed</button>
                         </div>
                         <div id="side-pagination-counter" style="margin-left:auto; display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:600; color:var(--text-muted); background:var(--bg-sub); padding:4px 10px; border-radius:20px; border:1px solid var(--border-color);">
-                            <span>Menampilkan <strong style="color:var(--primary);" id="side-item-range">0 - 0</strong> dari <strong style="color:var(--text-main);" id="side-item-total">0</strong> item</span>
+                            <span>Showing <strong style="color:var(--primary);" id="side-item-range">0 - 0</strong> of <strong style="color:var(--text-main);" id="side-item-total">0</strong> items</span>
                             <select id="side-page-size-select" class="filter-input" style="padding:2px 6px; font-size:0.75rem; border-radius:4px; margin-left:2px;" onchange="changePageSize(this.value)">
-                                <option value="20" selected>20 / hal</option>
-                                <option value="40">40 / hal</option>
-                                <option value="99999">Semua</option>
+                                <option value="20" selected>20 / page</option>
+                                <option value="40">40 / page</option>
+                                <option value="99999">All</option>
                             </select>
-                            <button class="btn-refresh-icon" onclick="refreshDataSilently()" title="Perbarui Data Terbaru (In-place refresh tanpa reload halaman)">
-                                <span class="refresh-icon">🔄</span><span class="refresh-text">Refresh</span>
+                            <button class="btn-refresh-icon" onclick="refreshDataSilently()" title="Refresh Latest Data (In-place update without page reload)">
+                                <span class="refresh-icon">
+                                    <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                                </span>
+                                <span class="refresh-text">Refresh</span>
                             </button>
                         </div>
                     </div>
@@ -3475,13 +3589,36 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                 <!-- Dynamic Tab Content Container -->
                 <div id="tab-content">
-                    <div style="text-align:center; padding:60px; color:var(--text-muted);">Memuat data outage...</div>
+                    <div style="text-align:center; padding:60px; color:var(--text-muted);">Loading outage data...</div>
                 </div>
             </main>
         </div>
     </div>
 
     <script>
+        const Icons = {
+            clipboard: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
+            sliders: `<svg class="ui-icon sm" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>`,
+            gauge: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>`,
+            shield: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
+            users: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
+            user: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
+            plus: `<svg class="ui-icon sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`,
+            trash: `<svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
+            save: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>`,
+            camera: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`,
+            check: `<svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
+            checkCircle: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+            alertTriangle: `<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`,
+            activity: `<svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>`,
+            lock: `<svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`,
+            unlock: `<svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>`,
+            refresh: `<svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`,
+            sun: `<svg class="ui-icon md" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`,
+            moon: `<svg class="ui-icon md" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`,
+            eye: `<svg class="ui-icon md" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`,
+            eyeOff: `<svg class="ui-icon md" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`
+        };
         let currentUnit = 1;
         let currentTab = 'wo';
         let currentViewMode = 'cards';
@@ -3536,8 +3673,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
-            const icon = type === 'success' ? '✅' : (type === 'error' ? '❌' : 'ℹ️');
-            toast.innerHTML = `<span style="font-size:1.1rem;">${icon}</span><div>${message}</div>`;
+            const iconSvg = type === 'success' ? Icons.checkCircle : (type === 'error' ? Icons.alertTriangle : Icons.activity);
+            toast.innerHTML = `<span style="display:inline-flex;">${iconSvg}</span><div>${message}</div>`;
             container.appendChild(toast);
             setTimeout(() => {
                 toast.style.opacity = '0';
@@ -3561,7 +3698,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     fullData.master_instruments = compData.instruments || [];
                 }
                 const titleEl = document.getElementById('outage-unit-title');
-                if(titleEl) titleEl.innerText = `Monitoring Progress Outage EIC Unit ${currentUnit}`;
+                if(titleEl) titleEl.innerText = `Outage EIC Monitoring Progress Unit ${currentUnit}`;
                 
                 renderStats();
                 populateFilterDropdowns();
@@ -3570,9 +3707,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 console.error("Error loading data:", e);
                 document.getElementById('tab-content').innerHTML = `
                 <div style="color:#ef4444; padding:24px; background:var(--bg-card); border-radius:12px; border:1px solid rgba(239,68,68,0.3);">
-                    <strong style="font-size:1.1rem;">⚠️ Gagal memuat data Unit ${currentUnit}</strong>
-                    <div style="margin-top:8px; font-size:0.88rem; color:var(--text-main);">Detail Kendala: ${e.message}</div>
-                    <div style="margin-top:12px; font-size:0.82rem; color:var(--text-muted);">Tips: Pastikan server.exe atau start_app.bat sedang berjalan dan file Excel <code>Template_Outage_EIC_Monitoring_unit ${currentUnit}.xlsx</code> berada di folder yang sama.</div>
+                    <strong style="font-size:1.1rem;">Failed to load Unit ${currentUnit} data</strong>
+                    <div style="margin-top:8px; font-size:0.88rem; color:var(--text-main);">Error Detail: ${e.message}</div>
+                    <div style="margin-top:12px; font-size:0.82rem; color:var(--text-muted);">Troubleshooting: Ensure server.exe or start_app.bat is running and the file <code>Template_Outage_EIC_Monitoring_unit ${currentUnit}.xlsx</code> exists in the root directory.</div>
                 </div>`;
             }
         }
@@ -3582,13 +3719,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             btns.forEach(b => {
                 b.classList.add('is-loading');
                 const txt = b.querySelector('.refresh-text');
-                if(txt) txt.innerText = 'Memuat...';
+                if(txt) txt.innerText = 'Loading...';
             });
             try {
                 await loadData();
-                showToast('✓ Data berhasil diperbarui!', 'info');
+                showToast('✓ Data refreshed successfully!', 'info');
             } catch(e) {
-                showToast('Gagal memuat data terbaru: ' + e.message, 'error');
+                showToast('Failed to load latest data: ' + e.message, 'error');
             } finally {
                 btns.forEach(b => {
                     b.classList.remove('is-loading');
@@ -3638,16 +3775,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const s = fullData.summary;
 
             document.getElementById('grand-pct').innerText = `${s.grand_pct}%`;
-            document.getElementById('grand-counts').innerText = `${s.grand_done} / ${s.grand_total} Sub-task / Item`;
+            document.getElementById('grand-counts').innerText = `${s.grand_done} / ${s.grand_total} Sub-tasks / Items`;
             document.getElementById('grand-bar-fill').style.width = `${s.grand_pct}%`;
 
             document.getElementById('wo-pct').innerText = `${s.wo.pct}%`;
-            document.getElementById('wo-counts').innerText = `${s.wo.subtask_done} / ${s.wo.subtask_total} Sub-task`;
-            document.getElementById('wo-sub').innerText = `WO Selesai: ${s.wo.finish} / ${s.wo.total} | In-Prog: ${s.wo.in_progress}`;
+            document.getElementById('wo-counts').innerText = `${s.wo.subtask_done} / ${s.wo.subtask_total} Sub-tasks`;
+            document.getElementById('wo-sub').innerText = `Finish WO: ${s.wo.finish} / ${s.wo.total} | In-Prog: ${s.wo.in_progress}`;
 
             document.getElementById('act-pct').innerText = `${s.actuator.pct}%`;
-            document.getElementById('act-counts').innerText = `${s.actuator.subtask_done} / ${s.actuator.subtask_total} Sub-task`;
-            document.getElementById('act-sub').innerText = `Valve Selesai: ${s.actuator.finish} / ${s.actuator.total} | In-Prog: ${s.actuator.in_progress}`;
+            document.getElementById('act-counts').innerText = `${s.actuator.subtask_done} / ${s.actuator.subtask_total} Sub-tasks`;
+            document.getElementById('act-sub').innerText = `Finish Valves: ${s.actuator.finish} / ${s.actuator.total} | In-Prog: ${s.actuator.in_progress}`;
 
             document.getElementById('inst-pct').innerText = `${s.instrument.pct}%`;
             document.getElementById('inst-counts').innerText = `${s.instrument.done} / ${s.instrument.total}`;
@@ -3676,7 +3813,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const picSelect = document.getElementById('filter-pic');
             if(picSelect) {
                 const current = picSelect.value;
-                picSelect.innerHTML = '<option value="">Semua PIC</option>';
+                picSelect.innerHTML = '<option value="">All PICs</option>';
                 (fullData.pics || []).forEach(p => {
                     if(p) picSelect.innerHTML += `<option value="${p}" ${current===p?'selected':''}>${p}</option>`;
                 });
@@ -3689,7 +3826,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 (fullData.work_orders || []).forEach(w => { if(w && w.area) areas.add(w.area); });
                 (fullData.actuators || []).forEach(a => { if(a && a.area) areas.add(a.area); });
                 (fullData.pressure_tx || []).forEach(p => { if(p && p.area) areas.add(p.area); });
-                areaSelect.innerHTML = '<option value="">Semua Area</option>';
+                areaSelect.innerHTML = '<option value="">All Areas</option>';
                 Array.from(areas).sort().forEach(a => {
                     areaSelect.innerHTML += `<option value="${a}" ${current===a?'selected':''}>${a}</option>`;
                 });
@@ -3734,17 +3871,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return `
             <div class="pagination-bar" style="margin-top:20px;">
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <span>Menampilkan <strong>${totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, totalItems)}</strong> dari <strong>${totalItems}</strong> item</span>
-                    <button class="btn-refresh-icon" onclick="refreshDataSilently()" title="Perbarui Data Terbaru (In-place refresh tanpa reload halaman)" style="padding:2px 6px; font-size:0.74rem;">
-                        <span class="refresh-icon">🔄</span><span class="refresh-text">Refresh</span>
+                    <span>Showing <strong>${totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, totalItems)}</strong> of <strong>${totalItems}</strong> items</span>
+                    <button class="btn-refresh-icon" onclick="refreshDataSilently()" title="Refresh Latest Data (In-place update without page reload)" style="padding:2px 6px; font-size:0.74rem;">
+                        <span class="refresh-icon">${Icons.refresh}</span><span class="refresh-text">Refresh</span>
                     </button>
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <button class="page-btn" onclick="changePage(1)" ${currentPage===1?'disabled':''}>⏮️ Awal</button>
-                    <button class="page-btn" onclick="changePage(${currentPage-1})" ${currentPage===1?'disabled':''}>◀️ Prev</button>
-                    <span style="font-weight:700; margin:0 6px;">Halaman ${currentPage} / ${totalPages}</span>
-                    <button class="page-btn" onclick="changePage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>Next ▶️</button>
-                    <button class="page-btn" onclick="changePage(${totalPages})" ${currentPage===totalPages?'disabled':''}>Akhir ⏭️</button>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <button class="page-btn" onclick="changePage(1)" ${currentPage===1?'disabled':''}>First</button>
+                    <button class="page-btn" onclick="changePage(${currentPage-1})" ${currentPage===1?'disabled':''}>Prev</button>
+                    <span style="font-weight:700; margin:0 6px; font-size:0.85rem;">Page ${currentPage} / ${totalPages}</span>
+                    <button class="page-btn" onclick="changePage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>Next</button>
+                    <button class="page-btn" onclick="changePage(${totalPages})" ${currentPage===totalPages?'disabled':''}>Last</button>
                 </div>
             </div>`;
         }
@@ -3800,42 +3937,42 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             html += `
             <div style="margin-bottom:20px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-wo-form')">
-                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700;">➕ Tambah Work Order (WO) Baru</h3>
-                    <span id="arrow-add-wo-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddWoOpen ? '▲ Tutup Form' : '▼ Buka Form'}</span>
+                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add New Work Order (WO)</h3>
+                    <span id="arrow-add-wo-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddWoOpen ? 'Close Form' : 'Add'}</span>
                 </div>
                 <div id="add-wo-form" class="accordion-form ${isAddWoOpen ? 'open' : ''}" style="${isAddWoOpen ? 'display:block;' : ''}">
                     <div class="form-grid">
                         <div class="form-group">
-                            <label>No Work Order (WO) <span style="color:#f43f5e;">*</span></label>
-                            <input type="text" id="new-wo-code" class="filter-input" placeholder="mis. WO-100826-0099">
+                            <label>WO Number <span style="color:#f43f5e;">*</span></label>
+                            <input type="text" id="new-wo-code" class="filter-input" placeholder="e.g. WO-100826-0099">
                         </div>
                         <div class="form-group">
                             <label>Job Description <span style="color:#f43f5e;">*</span></label>
-                            <input type="text" id="new-wo-desc" class="filter-input" placeholder="Deskripsi pekerjaan WO...">
+                            <input type="text" id="new-wo-desc" class="filter-input" placeholder="WO task description...">
                         </div>
                         <div class="form-group">
-                            <label>Area System</label>
+                            <label>System Area</label>
                             <input type="text" id="new-wo-area" class="filter-input" placeholder="BOILER, ID FAN, COOLING TOWER...">
                         </div>
                         <div class="form-group">
-                            <label>PIC Penanggung Jawab</label>
+                            <label>Person in Charge (PIC)</label>
                             <select id="new-wo-pic" class="filter-input">
-                                <option value="">Pilih PIC...</option>
+                                <option value="">Select PIC...</option>
                                 ${(fullData.pics || []).map(p => `<option value="${p}">${p}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Tanggal Schedule</label>
+                            <label>Schedule Date</label>
                             <input type="date" id="new-wo-sched" class="filter-input">
                         </div>
                         <div class="form-group" style="grid-column: span 2;">
-                            <label>Checklist Sub-task (Pisahkan dengan koma atau baris baru)</label>
-                            <textarea id="new-wo-checklist" class="textarea-full" placeholder="mis. General Inspection, Cleaning Contact, Function Test, Tightening Bolt"></textarea>
+                            <label>Sub-Task Checklist (Separate by comma or new line)</label>
+                            <textarea id="new-wo-checklist" class="textarea-full" placeholder="e.g. General Inspection, Cleaning Contact, Function Test, Tightening Bolt"></textarea>
                         </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
-                        <button class="btn-save" onclick="saveNewWO()">💾 Simpan Work Order Baru</button>
-                        <button class="page-btn" onclick="toggleAccordion('add-wo-form')">Batal</button>
+                        <button class="btn-save" onclick="saveNewWO()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Work Order</button>
+                        <button class="page-btn" onclick="toggleAccordion('add-wo-form')">Cancel</button>
                     </div>
                 </div>
             </div>`;
@@ -3843,7 +3980,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             updateSidePaginationCounter(filteredItems.length);
 
             if(filteredItems.length === 0) {
-                html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">Tidak ada Work Order yang sesuai dengan filter pencarian.</div>';
+                html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">No Work Orders match the current filter criteria.</div>';
                 container.innerHTML = html;
                 return;
             }
@@ -3865,15 +4002,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div class="item-card" id="card-wo-${item.no_wo}">
                         <div class="item-header" onclick="toggleAccordion('${bodyId}')">
                             <div class="item-title-box">
-                                <div class="item-code">${item.no_wo} &bull; ${item.area || 'GENERAL'} ${item.tanggal_finish ? '&bull; 🏁 Selesai: ' + item.tanggal_finish : ''}</div>
+                                <div class="item-code">${item.no_wo} &bull; ${item.area || 'GENERAL'} ${item.tanggal_finish ? '&bull; Finished: ' + item.tanggal_finish : ''}</div>
                                 <div class="item-name">${item.job_description}</div>
                             </div>
                             <div class="header-actions">
                                 <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('wo', '${item.no_wo}', '${item.no_wo} - ${item.job_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
-                                    📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Temuan' : '+ Temuan')}
+                                    ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
                                 </button>
-                                <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">👤 ${item.pic || '-'}</span>
-                                <span class="wo-subtask-progress" style="font-size:0.82rem; font-weight:700; color:var(--text-muted);">${doneCount} / ${totalCount} Sub-task</span>
+                                <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">${item.pic || '-'}</span>
+                                <span class="wo-subtask-progress" style="font-size:0.82rem; font-weight:700; color:var(--text-muted);">${doneCount} / ${totalCount} Sub-tasks</span>
                                 <span class="status-badge badge-${st}">${item.status}</span>
                                 <div class="progress-box">
                                     <div class="progress-bar-bg"><div class="progress-bar-fill progress-fill" style="width:${item.persen_progress}%;"></div></div>
@@ -3884,11 +4021,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div class="item-body ${isOpen ? 'open' : ''}" id="${bodyId}" style="${isOpen ? 'display:block;' : ''}">
                             <div class="checklist-section">
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-                                    <div class="section-h4" style="margin-bottom:0;">📋 Checklist Sub-Task (${doneCount} / ${totalCount} Selesai)</div>
+                                    <div class="section-h4" style="margin-bottom:0;">Sub-Task Checklist (${doneCount} / ${totalCount} Completed)</div>
                                     ${totalCount > 0 ? `
                                         <div style="display:flex; gap:6px;">
-                                            <button class="btn-batch-check" onclick="batchToggleSubtasks('${item.no_wo}', 'mark_all_done')" title="Tandai semua sub-task selesai">✓ Selesai Semua</button>
-                                            <button class="btn-batch-reset" onclick="batchToggleSubtasks('${item.no_wo}', 'reset_all')" title="Reset semua sub-task">↺ Reset</button>
+                                            <button class="btn-batch-check" onclick="batchToggleSubtasks('${item.no_wo}', 'mark_all_done')" title="Mark all sub-tasks as completed" style="display:inline-flex; align-items:center; gap:4px;">${Icons.check} Mark All Done</button>
+                                            <button class="btn-batch-reset" onclick="batchToggleSubtasks('${item.no_wo}', 'reset_all')" title="Reset all sub-tasks" style="display:inline-flex; align-items:center; gap:4px;">${Icons.refresh} Reset</button>
                                         </div>
                                     ` : ''}
                                 </div>
@@ -3906,8 +4043,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                                     ${typeBadge}
                                                 </div>
                                                 <div class="checklist-footer-right">
-                                                    ${c.tanggal ? `<span class="date-badge" style="font-size:0.72rem; color:var(--status-finish); font-family:'JetBrains Mono',monospace; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:2px 7px; border-radius:4px;" title="Tanggal Dikerjakan">📅 ${c.tanggal}</span>` : ''}
-                                                    <button class="btn-del-subtask-cross" title="Hapus Subtask" onclick="deleteSubtask('${item.no_wo}', '${(c.sub_task||'').toString().replace(/'/g, "\\'")}')" aria-label="Hapus">&times;</button>
+                                                    ${c.tanggal ? `<span class="date-badge" style="font-size:0.72rem; color:var(--status-finish); font-family:'JetBrains Mono',monospace; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:2px 7px; border-radius:4px;" title="Date Completed">${c.tanggal}</span>` : ''}
+                                                    <button class="btn-del-subtask-cross" title="Delete Subtask" onclick="deleteSubtask('${item.no_wo}', '${(c.sub_task||'').toString().replace(/'/g, "\\'")}')" aria-label="Delete">&times;</button>
                                                 </div>
                                             </div>
                                         </div>`;
@@ -3916,35 +4053,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 
                                 <div style="margin-top:14px; background:rgba(0,0,0,0.2); border:1px solid var(--border-color); border-radius:8px; padding:10px 12px;">
                                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                                        <span style="font-size:0.78rem; font-weight:700; color:var(--text-muted);">➕ Tambah Sub-task ke WO:</span>
+                                        <span style="font-size:0.78rem; font-weight:700; color:var(--text-muted);">Add Sub-task to WO:</span>
                                         <div style="display:flex; gap:5px;">
-                                            <button type="button" class="comp-mode-btn btn-mode-manual ${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'manual')">✏️ Manual</button>
-                                            <button type="button" class="comp-mode-btn btn-mode-act ${subtaskAddModes[item.no_wo]==='actuator'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'actuator')">⚙️ Pilih Actuator (${(fullData.master_actuators||fullData.actuators||[]).length})</button>
-                                            <button type="button" class="comp-mode-btn btn-mode-inst ${subtaskAddModes[item.no_wo]==='instrument'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'instrument')">📟 Pilih Instrument (${((fullData.pressure_tx||[]).length + (fullData.temperature_tx||[]).length + (fullData.pressure_switch||[]).length)})</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-manual ${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'manual')">Manual</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-act ${subtaskAddModes[item.no_wo]==='actuator'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'actuator')">Select Actuator (${(fullData.master_actuators||fullData.actuators||[]).length})</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-inst ${subtaskAddModes[item.no_wo]==='instrument'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'instrument')">Select Instrument (${((fullData.pressure_tx||[]).length + (fullData.temperature_tx||[]).length + (fullData.pressure_switch||[]).length)})</button>
                                         </div>
                                     </div>
                                     
                                     <!-- Mode 1: Manual Input -->
                                     <div id="box-subtask-manual-${item.no_wo}" style="display:${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'flex':'none'}; gap:8px;">
-                                        <input type="text" id="new-subtask-${item.no_wo}" class="filter-input" placeholder="Ketik deskripsi sub-task (mis. INSPECTION FRAME MOTOR)..." style="flex-grow:1; font-size:0.82rem;">
-                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap;" onclick="addSubtask('${item.no_wo}', 'manual')">➕ Tambah</button>
+                                        <input type="text" id="new-subtask-${item.no_wo}" class="filter-input" placeholder="Type sub-task description (e.g. MOTOR FRAME INSPECTION)..." style="flex-grow:1; font-size:0.82rem;">
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;" onclick="addSubtask('${item.no_wo}', 'manual')">${Icons.plus} Add</button>
                                     </div>
 
                                     <!-- Mode 2: Actuator Dropdown Picker -->
                                     <div id="box-subtask-act-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='actuator'?'flex':'none'}; gap:8px;">
                                         <select id="new-subtask-act-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
-                                            <option value="">-- Pilih Actuator Valve dari Master List --</option>
+                                            <option value="">-- Select Actuator Valve from Master List --</option>
                                             ${(fullData.master_actuators || fullData.actuators || []).map(a => `
                                                 <option value="${a.equipment_description} ${a.kks||''}">[${a.area}] ${a.equipment_description} ${a.kks ? '('+a.kks+')' : ''}</option>
                                             `).join('')}
                                         </select>
-                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#f59e0b; border-color:#d97706; color:#000;" onclick="addSubtask('${item.no_wo}', 'actuator')">⚙️ Tambah Actuator</button>
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#f59e0b; border-color:#d97706; color:#000; display:inline-flex; align-items:center; gap:4px;" onclick="addSubtask('${item.no_wo}', 'actuator')">${Icons.plus} Add Actuator</button>
                                     </div>
 
                                     <!-- Mode 3: Instrument Dropdown Picker -->
                                     <div id="box-subtask-inst-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='instrument'?'flex':'none'}; gap:8px;">
                                         <select id="new-subtask-inst-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
-                                            <option value="">-- Pilih Instrument dari Master List (PT/TT/PS) --</option>
+                                            <option value="">-- Select Instrument from Master List (PT/TT/PS) --</option>
                                             <optgroup label="Pressure Transmitter (PTX)">
                                                 ${(fullData.pressure_tx || []).map(p => `
                                                     <option value="${p.kks ? p.kks+': ' : ''}${p.equipment}">[PTX - ${p.area}] ${p.kks ? p.kks+' : ' : ''}${p.equipment}</option>
@@ -3961,35 +4098,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                                 `).join('')}
                                             </optgroup>
                                         </select>
-                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#06b6d4; border-color:#0891b2; color:#000;" onclick="addSubtask('${item.no_wo}', 'instrument')">📟 Tambah Instrument</button>
+                                        <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; background:#06b6d4; border-color:#0891b2; color:#000; display:inline-flex; align-items:center; gap:4px;" onclick="addSubtask('${item.no_wo}', 'instrument')">${Icons.plus} Add Instrument</button>
                                     </div>
                                 </div>
                             </div>
 
                             <div class="form-grid">
                                 <div class="form-group">
-                                    <label>PIC Penanggung Jawab</label>
+                                    <label>Person in Charge (PIC)</label>
                                     <select id="pic-${item.no_wo}" class="filter-input">
-                                        <option value="">Pilih PIC...</option>
+                                        <option value="">Select PIC...</option>
                                         ${fullData.pics.map(p => `<option value="${p}" ${item.pic===p?'selected':''}>${p}</option>`).join('')}
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Tanggal Selesai (Finish Date)</label>
+                                    <label>Finish Date</label>
                                     <input type="date" id="finish-wo-${item.no_wo}" class="filter-input" value="${formatDateForInput(item.tanggal_finish)}">
                                 </div>
                                 <div class="form-group" style="grid-column: span 2;">
-                                    <label>Remarks / Catatan Lapangan</label>
-                                    <input type="text" id="rem-${item.no_wo}" class="filter-input" value="${item.remarks || ''}" placeholder="Catatan pekerjaan...">
+                                    <label>Field Remarks / Notes</label>
+                                    <input type="text" id="rem-${item.no_wo}" class="filter-input" value="${item.remarks || ''}" placeholder="Field remarks...">
                                 </div>
                             </div>
 
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px;">
                                 <div>
-                                    <button class="btn-danger" onclick="deleteWO('${item.no_wo}')">🗑️ Hapus WO</button>
+                                    <button class="btn-danger" onclick="deleteWO('${item.no_wo}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.trash} Delete WO</button>
                                 </div>
                                 <div style="display:flex; gap:10px;">
-                                    <button class="btn-save" onclick="saveWorkOrder('${item.no_wo}')">💾 Simpan Perubahan</button>
+                                    <button class="btn-save" onclick="saveWorkOrder('${item.no_wo}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Changes</button>
                                 </div>
                             </div>
                         </div>
@@ -4002,16 +4139,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <table class="dense-table">
                         <thead>
                             <tr>
-                                <th>No WO</th>
-                                <th>Deskripsi Pekerjaan</th>
+                                <th>WO No</th>
+                                <th>Job Description</th>
                                 <th>Area</th>
                                 <th>PIC</th>
-                                <th>Subtask</th>
+                                <th>Subtasks</th>
                                 <th>Progress</th>
                                 <th>Status</th>
-                                <th>Tgl Selesai</th>
-                                <th>Temuan & Foto</th>
-                                <th>Aksi</th>
+                                <th>Finish Date</th>
+                                <th>Findings & Photos</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -4037,11 +4174,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <td style="font-family:'JetBrains Mono'; font-size:0.8rem; color:var(--text-muted);">${item.tanggal_finish || '-'}</td>
                                     <td>
                                         <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('wo', '${item.no_wo}', '${item.no_wo} - ${item.job_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
-                                            📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
+                                            ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Photo')}
                                         </button>
                                     </td>
                                     <td>
-                                        <button class="page-btn" style="padding:4px 8px; font-size:0.78rem;" onclick="switchViewMode('cards'); toggleAccordion('body-wo-0');">Detail</button>
+                                        <button class="page-btn" style="padding:4px 8px; font-size:0.78rem;" onclick="switchViewMode('cards'); toggleAccordion('body-wo-0');">Details</button>
                                     </td>
                                 </tr>`;
                             }).join('')}
@@ -4071,38 +4208,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             html += `
             <div style="margin-bottom:20px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-act-form')">
-                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700;">➕ Tambah Actuator Valve Baru</h3>
-                    <span id="arrow-add-act-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddActOpen ? '▲ Tutup Form' : '▼ Buka Form'}</span>
+                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add New Actuator Valve</h3>
+                    <span id="arrow-add-act-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddActOpen ? 'Close Form' : 'Add'}</span>
                 </div>
                 <div id="add-act-form" class="accordion-form ${isAddActOpen ? 'open' : ''}" style="${isAddActOpen ? 'display:block;' : ''}">
                     <div class="form-grid">
                         <div class="form-group">
                             <label>Equipment ID <span style="color:#f43f5e;">*</span></label>
-                            <input type="text" id="new-act-id" class="filter-input" placeholder="mis. AV-099">
+                            <input type="text" id="new-act-id" class="filter-input" placeholder="e.g. AV-099">
                         </div>
                         <div class="form-group">
-                            <label>Deskripsi Equipment <span style="color:#f43f5e;">*</span></label>
-                            <input type="text" id="new-act-desc" class="filter-input" placeholder="ACTUATOR FEED WATER...">
+                            <label>Equipment Description <span style="color:#f43f5e;">*</span></label>
+                            <input type="text" id="new-act-desc" class="filter-input" placeholder="FEED WATER ACTUATOR...">
                         </div>
                         <div class="form-group">
-                            <label>Area System</label>
+                            <label>System Area</label>
                             <input type="text" id="new-act-area" class="filter-input" placeholder="BOILER, ID FAN...">
                         </div>
                         <div class="form-group">
-                            <label>Tag KKS</label>
+                            <label>KKS Tag</label>
                             <input type="text" id="new-act-kks" class="filter-input" placeholder="10LAB30AA210">
                         </div>
                         <div class="form-group">
-                            <label>PIC Penanggung Jawab</label>
+                            <label>Person in Charge (PIC)</label>
                             <select id="new-act-pic" class="filter-input">
-                                <option value="">Pilih PIC...</option>
+                                <option value="">Select PIC...</option>
                                 ${(fullData.pics || []).map(p => `<option value="${p}">${p}</option>`).join('')}
                             </select>
                         </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
-                        <button class="btn-save" onclick="saveNewActuator()">💾 Simpan Actuator Baru</button>
-                        <button class="page-btn" onclick="toggleAccordion('add-act-form')">Batal</button>
+                        <button class="btn-save" onclick="saveNewActuator()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Actuator</button>
+                        <button class="page-btn" onclick="toggleAccordion('add-act-form')">Cancel</button>
                     </div>
                 </div>
             </div>`;
@@ -4110,7 +4247,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             updateSidePaginationCounter(filteredItems.length);
 
             if(filteredItems.length === 0) {
-                html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">Tidak ada Actuator Valve yang sesuai filter.</div>';
+                html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">No Actuator Valves match the current filter criteria.</div>';
                 container.innerHTML = html;
                 return;
             }
@@ -4130,14 +4267,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div class="item-card">
                         <div class="item-header" onclick="toggleAccordion('${bodyId}')">
                             <div class="item-title-box">
-                                <div class="item-code">${item.equipment_id} &bull; ${item.area} ${item.kks ? '&bull; KKS: ' + item.kks : ''} ${item.finish_date ? '&bull; 🏁 Selesai: ' + item.finish_date : ''}</div>
+                                <div class="item-code">${item.equipment_id} &bull; ${item.area} ${item.kks ? '&bull; KKS: ' + item.kks : ''} ${item.finish_date ? '&bull; Finished: ' + item.finish_date : ''}</div>
                                 <div class="item-name">${item.equipment_description}</div>
                             </div>
                             <div class="header-actions">
                                 <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('actuator', '${item.equipment_id}', '${item.equipment_id} - ${item.equipment_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
-                                    📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Temuan' : '+ Temuan')}
+                                    ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
                                 </button>
-                                <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">👤 ${item.pic || '-'}</span>
+                                <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">${item.pic || '-'}</span>
                                 <span class="status-badge badge-${st}">${item.status}</span>
                                 <div class="progress-box">
                                     <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${item.persen_progress}%;"></div></div>
@@ -4147,7 +4284,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         </div>
                         <div class="item-body ${isOpen ? 'open' : ''}" id="${bodyId}" style="${isOpen ? 'display:block;' : ''}">
                             <div class="checklist-section">
-                                <div class="section-h4">⚙️ Sub-Task Actuator Valve</div>
+                                <div class="section-h4">Actuator Valve Sub-Tasks</div>
                                 <div class="checklist-grid">
                                     <div class="checklist-item ${item.general_inspection ? 'done' : ''}">
                                         <label>
@@ -4166,27 +4303,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                             <div class="form-grid">
                                 <div class="form-group">
-                                    <label>PIC Penanggung Jawab</label>
+                                    <label>Person in Charge (PIC)</label>
                                     <select id="pic-act-${item.equipment_id}" class="filter-input">
                                         ${fullData.pics.map(p => `<option value="${p}" ${item.pic===p?'selected':''}>${p}</option>`).join('')}
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Tanggal Selesai</label>
+                                    <label>Finish Date</label>
                                     <input type="date" id="finish-act-${item.equipment_id}" class="filter-input" value="${formatDateForInput(item.finish_date)}">
                                 </div>
                                 <div class="form-group">
-                                    <label>Remarks / Catatan</label>
-                                    <input type="text" id="rem-act-${item.equipment_id}" class="filter-input" value="${item.remarks || ''}" placeholder="Catatan...">
+                                    <label>Field Remarks / Notes</label>
+                                    <input type="text" id="rem-act-${item.equipment_id}" class="filter-input" value="${item.remarks || ''}" placeholder="Remarks...">
                                 </div>
                             </div>
 
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px;">
                                 <div>
-                                    <button class="btn-danger" onclick="deleteActuator('${item.equipment_id}')">🗑️ Hapus Actuator</button>
+                                    <button class="btn-danger" onclick="deleteActuator('${item.equipment_id}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.trash} Delete Actuator</button>
                                 </div>
                                 <div style="display:flex; gap:10px;">
-                                    <button class="btn-save" onclick="saveActuator('${item.equipment_id}', '${item.equipment_description}')">💾 Simpan Actuator</button>
+                                    <button class="btn-save" onclick="saveActuator('${item.equipment_id}', '${item.equipment_description}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Actuator</button>
                                 </div>
                             </div>
                         </div>
@@ -4200,14 +4337,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <thead>
                             <tr>
                                 <th>Equipment ID</th>
-                                <th>Deskripsi Actuator</th>
+                                <th>Actuator Description</th>
                                 <th>KKS</th>
                                 <th>Area</th>
                                 <th>PIC</th>
                                 <th>General Insp</th>
                                 <th>Function Test</th>
                                 <th>Status</th>
-                                <th>Temuan & Foto</th>
+                                <th>Findings & Photos</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -4230,7 +4367,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <td><span class="status-badge badge-${st}">${item.status} (${item.persen_progress}%)</span></td>
                                     <td>
                                         <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('actuator', '${item.equipment_id}', '${item.equipment_id} - ${item.equipment_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
-                                            📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
+                                            ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Photo')}
                                         </button>
                                     </td>
                                 </tr>`;
@@ -4331,13 +4468,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             let html = `
             <div style="margin-bottom:18px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-inst-form')">
-                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700;">➕ Tambah Instrument Baru</h3>
-                    <span id="arrow-add-inst-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddInstOpen ? '▲ Tutup Form' : '▼ Buka Form'}</span>
+                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add New Instrument</h3>
+                    <span id="arrow-add-inst-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddInstOpen ? 'Close Form' : 'Add'}</span>
                 </div>
                 <div id="add-inst-form" class="accordion-form ${isAddInstOpen ? 'open' : ''}" style="${isAddInstOpen ? 'display:block;' : ''}">
                     <div class="form-grid">
                         <div class="form-group">
-                            <label>Tipe Instrument <span style="color:#f43f5e;">*</span></label>
+                            <label>Instrument Type <span style="color:#f43f5e;">*</span></label>
                             <select id="new-inst-type" class="filter-input" onchange="updateAddInstFormFields(this.value)">
                                 <option value="pressure_tx" ${instSubtab==='ptx'?'selected':''}>Pressure Transmitter (PTX)</option>
                                 <option value="temperature_tx" ${instSubtab==='ttx'?'selected':''}>Temperature Transmitter (TTX)</option>
@@ -4345,38 +4482,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>Nama Equipment / Description <span style="color:#f43f5e;">*</span></label>
+                            <label>Equipment Name / Description <span style="color:#f43f5e;">*</span></label>
                             <input type="text" id="new-inst-desc" class="filter-input" placeholder="LDO PRESSURE BEFORE MTV, INLET ID FAN 1...">
                         </div>
                         <div class="form-group">
-                            <label>Tag KKS</label>
+                            <label>KKS Tag</label>
                             <input type="text" id="new-inst-kks" class="filter-input" placeholder="10HJF11CP301 / 10HNA61CP001">
                         </div>
                         <div class="form-group">
-                            <label>Area System</label>
+                            <label>System Area</label>
                             <input type="text" id="new-inst-area" class="filter-input" placeholder="BOILER, ESP, TURBINE...">
                         </div>
                         <div class="form-group" id="group-inst-subarea" style="${instSubtab==='psw'?'':'display:none;'}">
-                            <label>Sub-Area / System (mis. SUB 1, Lower Burner, Pri Fan 1)</label>
+                            <label>Sub-Area / System (e.g. SUB 1, Lower Burner, Pri Fan 1)</label>
                             <input type="text" id="new-inst-subarea" class="filter-input" placeholder="SUB 1, Lower Burner, Pri Fan 1, BFP 1...">
                         </div>
                         <div class="form-group" id="group-inst-range" style="${instSubtab==='psw'?'display:none;':''}">
-                            <label>Range Transmitter</label>
+                            <label>Transmitter Range</label>
                             <input type="text" id="new-inst-range" class="filter-input" placeholder="-70 - 70 mbar / 0 - 100 kPa">
                         </div>
                         <div class="form-group" id="group-inst-sp" style="${instSubtab==='psw'?'':'display:none;'}">
-                            <label>Set Point Nilai</label>
-                            <input type="text" id="new-inst-sp-val" class="filter-input" placeholder="mis. 8 Bar, 2.5 Kg/Cm2, 0.4 Kg/Cm2">
+                            <label>Set Point Value</label>
+                            <input type="text" id="new-inst-sp-val" class="filter-input" placeholder="e.g. 8 Bar, 2.5 Kg/Cm2, 0.4 Kg/Cm2">
                         </div>
                         <div class="form-group" id="group-inst-dir" style="${instSubtab==='psw'?'':'display:none;'}">
-                            <label>Arah Set Point</label>
+                            <label>Set Point Direction</label>
                             <select id="new-inst-sp-dir" class="filter-input">
                                 <option value="HIGH">HIGH</option>
                                 <option value="LOW">LOW</option>
                             </select>
                         </div>
                         <div class="form-group" id="group-inst-contact" style="${instSubtab==='psw'?'':'display:none;'}">
-                            <label>Tipe Kontak (NO / NC)</label>
+                            <label>Contact Type (NO / NC)</label>
                             <select id="new-inst-contact" class="filter-input">
                                 <option value="NO">NO (Normally Open)</option>
                                 <option value="NC">NC (Normally Closed)</option>
@@ -4384,8 +4521,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
-                        <button class="btn-save" onclick="saveNewInstrument()">💾 Simpan Instrument Baru</button>
-                        <button class="page-btn" onclick="toggleAccordion('add-inst-form')">Batal</button>
+                        <button class="btn-save" onclick="saveNewInstrument()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Instrument</button>
+                        <button class="page-btn" onclick="toggleAccordion('add-inst-form')">Cancel</button>
                     </div>
                 </div>
             </div>
@@ -4400,7 +4537,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             updateSidePaginationCounter(filteredItems.length);
 
             if(filteredItems.length === 0) {
-                html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">Tidak ada instrumen yang sesuai filter.</div>';
+                html += '<div style="text-align:center; padding:50px; color:var(--text-muted); background:var(--bg-card); border-radius:12px;">No instruments match the current filter criteria.</div>';
                 container.innerHTML = html;
                 return;
             }
@@ -4429,7 +4566,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <div class="item-code" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                                         <span style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || 'No Tag'}</span>
                                         <span>&bull; ${instSubtab === 'psw' ? (item.sub_area || item.area) : item.area}</span>
-                                        ${(item.finish_date || item.dated || item.tanggal) ? '<span>&bull; 🏁 Selesai: ' + (item.finish_date || item.dated || item.tanggal) + '</span>' : ''}
+                                        ${(item.finish_date || item.dated || item.tanggal) ? '<span>&bull; Finished: ' + (item.finish_date || item.dated || item.tanggal) + '</span>' : ''}
                                         ${instSubtab === 'psw' ? `
                                             <div class="setpoint-cell" style="padding:1px 6px; min-width:auto; margin-left:2px;">
                                                 <span class="setpoint-val" style="font-size:0.75rem;">${sp.value}</span>
@@ -4444,25 +4581,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </div>
                             <div class="header-actions">
                                 <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
-                                    📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Temuan' : '+ Temuan')}
+                                    ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
                                 </button>
-                                <span class="status-badge ${isVerif ? 'badge-FINISH' : (isCalib ? 'badge-IN-PROGRESS' : 'badge-SCHED-OK')}" id="badge-${cardPrefix}-${idx}">${isVerif ? 'DONE (100%)' : (isCalib ? 'IN PROGRESS (Kalibrasi OK)' : 'SCHEDULED')}</span>
+                                <span class="status-badge ${isVerif ? 'badge-FINISH' : (isCalib ? 'badge-IN-PROGRESS' : 'badge-SCHED-OK')}" id="badge-${cardPrefix}-${idx}">${isVerif ? 'DONE (100%)' : (isCalib ? 'IN PROGRESS (Calibration OK)' : 'SCHEDULED')}</span>
                             </div>
                         </div>
                         <div class="item-body ${isOpen ? 'open' : ''}" id="${bodyId}" style="${isOpen ? 'display:block;' : ''}">
                             <div class="checklist-section" style="margin-bottom:14px;">
-                                <div class="section-h4">📋 Checklist Progress Instrumen (Penentu Finish: Verifikasi)</div>
+                                <div class="section-h4">Instrument Milestone Checklist (Verification determines Finish)</div>
                                 <div class="checklist-grid">
                                     <div class="checklist-item ${isCalib ? 'done' : ''}" id="card-calib-${cardPrefix}-${idx}">
                                         <label style="cursor:pointer; display:flex; align-items:center; gap:8px;">
                                              <input type="checkbox" id="inst-calib-${idx}" ${isCalib ? 'checked' : ''} onchange="toggleLocalInstCheck('${instSubtab}', ${idx}, 'kalibrasi', this.checked)">
-                                             <span style="font-weight:700;">🛠️ 1. Kalibrasi Selesai</span>
+                                             <span style="font-weight:700;">1. Calibration Done</span>
                                         </label>
                                     </div>
                                     <div class="checklist-item ${isVerif ? 'done' : ''}" id="card-verif-${cardPrefix}-${idx}" style="${isVerif ? 'border-color:var(--status-finish);' : ''}">
                                         <label style="cursor:pointer; display:flex; align-items:center; gap:8px;">
                                              <input type="checkbox" id="inst-verif-${idx}" ${isVerif ? 'checked' : ''} onchange="toggleLocalInstCheck('${instSubtab}', ${idx}, 'verifikasi', this.checked)">
-                                             <span style="font-weight:800; color:${isVerif ? 'var(--status-finish)' : 'var(--primary)'};">🔍 2. Verifikasi Selesai (Penentu Finish)</span>
+                                             <span style="font-weight:800; color:${isVerif ? 'var(--status-finish)' : 'var(--primary)'};">2. Verification Finished (100% DONE)</span>
                                         </label>
                                     </div>
                                 </div>
@@ -4474,18 +4611,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <input type="text" id="subarea-psw-${idx}" class="filter-input" value="${item.sub_area || item.area || ''}" placeholder="SUB 1, Lower Burner, Pri Fan 1...">
                                 </div>
                                 <div class="form-group">
-                                    <label>Set Point (Nilai)</label>
-                                    <input type="text" id="sp-val-psw-${idx}" class="filter-input" value="${sp.value}" placeholder="mis. 8 Bar, 2.5 Kg/Cm2">
+                                    <label>Set Point (Value)</label>
+                                    <input type="text" id="sp-val-psw-${idx}" class="filter-input" value="${sp.value}" placeholder="e.g. 8 Bar, 2.5 Kg/Cm2">
                                 </div>
                                 <div class="form-group">
-                                    <label>Arah Set Point</label>
+                                    <label>Set Point Direction</label>
                                     <select id="sp-dir-psw-${idx}" class="filter-input">
                                         <option value="HIGH" ${sp.dir==='HIGH'?'selected':''}>HIGH</option>
                                         <option value="LOW" ${sp.dir==='LOW'?'selected':''}>LOW</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Tipe Kontak (NO / NC)</label>
+                                    <label>Contact Type (NO / NC)</label>
                                     <select id="contact-psw-${idx}" class="filter-input">
                                         <option value="NO" ${contact==='NO'?'selected':''}>NO (Normally Open)</option>
                                         <option value="NC" ${contact==='NC'?'selected':''}>NC (Normally Closed)</option>
@@ -4494,52 +4631,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </div>
                             <div class="calib-grid">
                                 <div class="calib-col">
-                                    <h5>📥 AS FOUND (Kondisi Awal)</h5>
+                                    <h5>AS FOUND (Initial Condition)</h5>
                                     <div class="calib-fields">
                                         <div class="form-group">
                                             <label>Set Point</label>
-                                            <input type="text" id="af-set-${idx}" class="filter-input" value="${item.asfound_set || ''}" placeholder="mis. 7.8 Bar">
+                                            <input type="text" id="af-set-${idx}" class="filter-input" value="${item.asfound_set || ''}" placeholder="e.g. 7.8 Bar">
                                         </div>
                                         <div class="form-group">
                                             <label>Reset Point</label>
-                                            <input type="text" id="af-reset-${idx}" class="filter-input" value="${item.asfound_reset || ''}" placeholder="mis. 7.2 Bar">
+                                            <input type="text" id="af-reset-${idx}" class="filter-input" value="${item.asfound_reset || ''}" placeholder="e.g. 7.2 Bar">
                                         </div>
                                     </div>
                                 </div>
                                 <div class="calib-col">
-                                    <h5>📤 AS LEFT (Setelah Kalibrasi)</h5>
+                                    <h5>AS LEFT (After Calibration)</h5>
                                     <div class="calib-fields">
                                         <div class="form-group">
                                             <label>Set Point</label>
-                                            <input type="text" id="al-set-${idx}" class="filter-input" value="${item.asleft_set || ''}" placeholder="mis. 8.0 Bar">
+                                            <input type="text" id="al-set-${idx}" class="filter-input" value="${item.asleft_set || ''}" placeholder="e.g. 8.0 Bar">
                                         </div>
                                         <div class="form-group">
                                             <label>Reset Point</label>
-                                            <input type="text" id="al-reset-${idx}" class="filter-input" value="${item.asleft_reset || ''}" placeholder="mis. 7.5 Bar">
+                                            <input type="text" id="al-reset-${idx}" class="filter-input" value="${item.asleft_reset || ''}" placeholder="e.g. 7.5 Bar">
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             <div class="form-grid">
                                 <div class="form-group">
-                                    <label>Hasil Kalibrasi</label>
+                                    <label>Calibration Result</label>
                                     <select id="res-psw-${idx}" class="filter-input">
-                                        <option value="OK" ${item.status_ok_notok==='OK'?'selected':''}>OK / Sesuai Standar</option>
-                                        <option value="NOT OK" ${item.status_ok_notok==='NOT OK'?'selected':''}>NOT OK / Deviasi</option>
+                                        <option value="OK" ${item.status_ok_notok==='OK'?'selected':''}>OK / Within Tolerance</option>
+                                        <option value="NOT OK" ${item.status_ok_notok==='NOT OK'?'selected':''}>NOT OK / Deviation</option>
                                     </select>
                                 </div>` : `<div class="form-grid">`}
                                 <div class="form-group" style="grid-column: span 2;">
-                                    <label>Catatan / Remarks</label>
-                                    <input type="text" id="inst-rem-${idx}" class="filter-input" value="${item.remarks || ''}" placeholder="Catatan kalibrasi / verifikasi...">
+                                    <label>Field Remarks / Notes</label>
+                                    <input type="text" id="inst-rem-${idx}" class="filter-input" value="${item.remarks || ''}" placeholder="Calibration / verification remarks...">
                                 </div>
                             </div>
 
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px;">
                                 <div>
-                                    <button class="btn-danger" onclick="deleteInstrument('${instSubtab}', '${item.kks || item.no}')">🗑️ Hapus Instrument</button>
+                                    <button class="btn-danger" onclick="deleteInstrument('${instSubtab}', '${item.kks || item.no}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.trash} Delete Instrument</button>
                                 </div>
                                 <div style="display:flex; gap:10px;">
-                                    <button class="btn-save" onclick="${instSubtab==='psw' ? 'savePressureSwitch' : 'saveTransmitter'}('${instSubtab}', '${item.kks || item.no}', ${idx})">💾 Simpan Kalibrasi & Verifikasi</button>
+                                    <button class="btn-save" onclick="${instSubtab==='psw' ? 'savePressureSwitch' : 'saveTransmitter'}('${instSubtab}', '${item.kks || item.no}', ${idx})" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Calibration & Verification</button>
                                 </div>
                             </div>
                         </div>
@@ -4553,15 +4690,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <table class="dense-table">
                             <thead>
                                 <tr>
-                                    <th>Tag KKS</th>
+                                    <th>KKS Tag</th>
                                     <th>Equipment Description</th>
                                     <th>Area / Sub-Area</th>
                                     <th style="text-align:center;">Set Point</th>
                                     <th style="text-align:center;">Contact (NO/NC)</th>
-                                    <th style="text-align:center;">🛠️ Kalibrasi</th>
-                                    <th style="text-align:center;">🔍 Verifikasi</th>
-                                    <th>Status Finish</th>
-                                    <th>Temuan & Foto</th>
+                                    <th style="text-align:center;">Calibration</th>
+                                    <th style="text-align:center;">Verification</th>
+                                    <th>Finish Status</th>
+                                    <th>Findings & Photos</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -4599,7 +4736,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                         </td>
                                         <td>
                                             <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', 'pressure_switch')">
-                                                📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
+                                                ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Photo')}
                                             </button>
                                         </td>
                                     </tr>`;
@@ -4613,14 +4750,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <table class="dense-table">
                             <thead>
                                 <tr>
-                                    <th>Tag KKS</th>
+                                    <th>KKS Tag</th>
                                     <th>Equipment Description</th>
                                     <th>Area</th>
-                                    <th>Range / Satuan</th>
-                                    <th style="text-align:center;">🛠️ Kalibrasi</th>
-                                    <th style="text-align:center;">🔍 Verifikasi</th>
-                                    <th>Status Finish</th>
-                                    <th>Temuan & Foto</th>
+                                    <th>Range / Units</th>
+                                    <th style="text-align:center;">Calibration</th>
+                                    <th style="text-align:center;">Verification</th>
+                                    <th>Finish Status</th>
+                                    <th>Findings & Photos</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -4646,7 +4783,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                         </td>
                                         <td>
                                             <button class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='ptx'?'pressure_tx':'temperature_tx'}')">
-                                                📷 ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Foto' : (hasFindings ? 'Ada Temuan' : '+ Foto')}
+                                                ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Photo')}
                                             </button>
                                         </td>
                                     </tr>`;
@@ -4668,24 +4805,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <!-- Master Protection & Security Status Banner -->
                 <div class="scope-lock-banner ${isScopeMasterUnlocked ? 'unlocked' : 'locked'}">
                     <div style="display:flex; align-items:center; gap:12px;">
-                        <div class="lock-icon-circle ${isScopeMasterUnlocked ? 'open' : ''}">${isScopeMasterUnlocked ? '🔓' : '🔒'}</div>
+                        <div class="lock-icon-circle ${isScopeMasterUnlocked ? 'open' : ''}">${isScopeMasterUnlocked ? Icons.unlock : Icons.lock}</div>
                         <div>
                             <div style="font-size:0.94rem; font-weight:800; color:${isScopeMasterUnlocked ? '#10b981' : 'var(--text-main)'};">
-                                ${isScopeMasterUnlocked ? 'Mode Edit Master Terbuka (Full Access)' : 'Mode Proteksi Master EIC'}
+                                ${isScopeMasterUnlocked ? 'Master Edit Mode Unlocked (Full Access)' : 'Master EIC Protection Mode (Protected)'}
                             </div>
                             <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
-                                ${isScopeMasterUnlocked ? 'Anda dapat menambah, mengubah, dan menghapus data Master PIC serta Scope Pekerjaan Outage.' : 'Data Master PIC dan Master Scope diproteksi. Masukkan password untuk membuka mode edit.'}
+                                ${isScopeMasterUnlocked ? 'You can add, edit, and delete Master PIC personnel and Outage Job Scope definitions.' : 'Master PIC personnel and Master Scope data are protected. Enter authorization password to unlock edit mode.'}
                             </div>
                         </div>
                     </div>
                     <div>
                         ${isScopeMasterUnlocked ? `
-                            <button class="page-btn" style="padding:7px 16px; font-size:0.82rem; color:#f43f5e; border-color:rgba(244,63,94,0.4); font-weight:700;" onclick="lockMasterScope()" title="Kunci kembali akses edit">
-                                🔒 Kunci Kembali
+                            <button class="page-btn" style="padding:7px 16px; font-size:0.82rem; color:#f43f5e; border-color:rgba(244,63,94,0.4); font-weight:700;" onclick="lockMasterScope()" title="Lock edit access">
+                                ${Icons.lock} Lock Mode
                             </button>
                         ` : `
-                            <button class="btn-save" style="padding:8px 18px; font-size:0.84rem; background:linear-gradient(135deg, #6366f1, #4f46e5); box-shadow:0 4px 12px rgba(99,102,241,0.3);" onclick="openMasterPasswordModal()" title="Buka password untuk edit data master">
-                                🔓 Buka Kunci Edit
+                            <button class="btn-save" style="padding:8px 18px; font-size:0.84rem; background:linear-gradient(135deg, #6366f1, #4f46e5); box-shadow:0 4px 12px rgba(99,102,241,0.3);" onclick="openMasterPasswordModal()" title="Enter authorization password to unlock edit access">
+                                ${Icons.unlock} Unlock Edit Mode
                             </button>
                         `}
                     </div>
@@ -4694,16 +4831,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <!-- Master PIC Card -->
                 <div style="background:var(--bg-card); border-radius:var(--radius-lg); padding:22px; border:1px solid var(--border-color);">
                     <div style="margin-bottom:8px;">
-                        <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0;">👥 Master PIC Tim EIC</h3>
+                        <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0; display:inline-flex; align-items:center; gap:8px;">${Icons.users} Master EIC Team PICs</h3>
                     </div>
-                    <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:16px;">Daftar nama penanggung jawab EIC. Semua pilihan dropdown PIC di Work Order, Actuator, & Instrumen tersinkron otomatis dari daftar master ini.</p>
+                    <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:16px;">Registered EIC responsible personnel. All PIC dropdown selectors across Work Orders, Actuators, & Instruments automatically sync from this master list.</p>
                     
                     <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:${isScopeMasterUnlocked ? '18px' : '4px'};">
                         ${(fullData.pics || []).map(p => `
                             <span style="padding:6px 14px; background:var(--bg-sub); border:1px solid var(--border-color); border-radius:20px; font-size:0.85rem; font-weight:600; color:var(--text-main); display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 5px rgba(0,0,0,0.05);">
-                                👤 ${p}
+                                ${p}
                                 ${isScopeMasterUnlocked ? `
-                                    <button style="background:none; border:none; color:#f43f5e; cursor:pointer; font-weight:700; font-size:0.85rem; padding:0 2px;" title="Hapus PIC" onclick="deletePic('${(p||'').toString().replace(/'/g, "\\'")}')">✖</button>
+                                    <button style="background:none; border:none; color:#f43f5e; cursor:pointer; font-weight:700; font-size:0.85rem; padding:0 2px;" title="Delete PIC" onclick="deletePic('${(p||'').toString().replace(/'/g, "\\'")}')">&times;</button>
                                 ` : ''}
                             </span>
                         `).join('')}
@@ -4711,8 +4848,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                     ${isScopeMasterUnlocked ? `
                         <div style="display:flex; gap:10px; max-width:480px;">
-                            <input type="text" id="new-pic-input" class="filter-input" placeholder="Masukkan nama personil / vendor PIC baru..." style="flex-grow:1;">
-                            <button class="btn-save" onclick="addNewPic()">➕ Tambah PIC</button>
+                            <input type="text" id="new-pic-input" class="filter-input" placeholder="Enter new PIC personnel / vendor name..." style="flex-grow:1;">
+                            <button class="btn-save" onclick="addNewPic()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add PIC</button>
                         </div>
                     ` : ''}
                 </div>
@@ -4720,9 +4857,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <!-- Scope Master Table -->
                 <div style="background:var(--bg-card); border-radius:var(--radius-lg); padding:22px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
-                        <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0;">📋 Master Scope Pekerjaan Outage (Vendor & MSW Scope)</h3>
+                        <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0; display:inline-flex; align-items:center; gap:8px;">${Icons.clipboard} Master Outage Job Scope</h3>
                         ${isScopeMasterUnlocked ? `
-                            <button class="page-btn" style="font-size:0.82rem; font-weight:700;" onclick="toggleAccordion('add-scope-form')">${openCardIds.has('add-scope-form') ? '▲ Tutup Scope' : '➕ Tambah Scope'}</button>
+                            <button class="page-btn" style="font-size:0.82rem; font-weight:700; display:inline-flex; align-items:center; gap:6px;" onclick="toggleAccordion('add-scope-form')">${openCardIds.has('add-scope-form') ? 'Close Scope Form' : Icons.plus + ' Add Scope'}</button>
                         ` : ''}
                     </div>
                     
@@ -4730,15 +4867,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div id="add-scope-form" class="accordion-form ${openCardIds.has('add-scope-form') ? 'open' : ''}" style="${openCardIds.has('add-scope-form') ? 'display:block;' : ''}; margin-bottom:18px;">
                             <div class="form-grid">
                                 <div class="form-group">
-                                    <label>Kategori Scope</label>
+                                    <label>Scope Category</label>
                                     <input type="text" id="new-scope-cat" class="filter-input" placeholder="BOILER, TURBINE...">
                                 </div>
                                 <div class="form-group">
-                                    <label>Equipment / Scope Pekerjaan <span style="color:#f43f5e;">*</span></label>
-                                    <input type="text" id="new-scope-eq" class="filter-input" placeholder="Inspeksi Burner...">
+                                    <label>Equipment / Job Scope <span style="color:#f43f5e;">*</span></label>
+                                    <input type="text" id="new-scope-eq" class="filter-input" placeholder="Burner Inspection...">
                                 </div>
                                 <div class="form-group">
-                                    <label>Tipe Scope</label>
+                                    <label>Scope Type</label>
                                     <select id="new-scope-type" class="filter-input">
                                         <option value="MSW">MSW</option>
                                         <option value="Vendor">Vendor</option>
@@ -4746,16 +4883,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>PIC Penanggung Jawab</label>
+                                    <label>Person in Charge (PIC)</label>
                                     <select id="new-scope-pic" class="filter-input">
-                                        <option value="">Pilih PIC...</option>
+                                        <option value="">Select PIC...</option>
                                         ${(fullData.pics || []).map(p => `<option value="${p}">${p}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
                             <div style="display:flex; gap:10px; margin-top:12px;">
-                                <button class="btn-save" onclick="saveNewScope()">💾 Simpan Scope Baru</button>
-                                <button class="page-btn" onclick="toggleAccordion('add-scope-form')">Batal</button>
+                                <button class="btn-save" onclick="saveNewScope()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Scope</button>
+                                <button class="page-btn" onclick="toggleAccordion('add-scope-form')">Cancel</button>
                             </div>
                         </div>
                     ` : ''}
@@ -4764,11 +4901,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <table class="dense-table">
                             <thead>
                                 <tr>
-                                    <th>Kategori Scope</th>
-                                    <th>Equipment / Scope Pekerjaan</th>
-                                    <th>Tipe Scope</th>
-                                    <th>PIC Penanggung Jawab</th>
-                                    ${isScopeMasterUnlocked ? '<th>Aksi</th>' : ''}
+                                    <th>Scope Category</th>
+                                    <th>Equipment / Job Scope</th>
+                                    <th>Scope Type</th>
+                                    <th>Person in Charge (PIC)</th>
+                                    ${isScopeMasterUnlocked ? '<th>Actions</th>' : ''}
                                 </tr>
                             </thead>
                             <tbody>
@@ -4796,21 +4933,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                         <td>
                                             ${isScopeMasterUnlocked ? `
                                                 <select id="scope-pic-${sIdx}" class="filter-input" style="padding:5px 8px; font-size:0.85rem;" onchange="saveScopeRow(${sIdx})">
-                                                    <option value="">Pilih PIC...</option>
+                                                    <option value="">Select PIC...</option>
                                                     ${(fullData.pics || []).map(p => {
                                                         const isSel = (s.pic === p || (s.pic||'').toUpperCase() === (p||'').toUpperCase());
                                                         return `<option value="${p}" ${isSel ? 'selected' : ''}>${p}</option>`;
                                                     }).join('')}
                                                 </select>
                                             ` : `
-                                                <span style="font-size:0.85rem; font-weight:600; color:var(--primary);">👤 ${s.pic || '-'}</span>
+                                                <span style="font-size:0.85rem; font-weight:600; color:var(--primary);">${s.pic || '-'}</span>
                                             `}
                                         </td>
                                         ${isScopeMasterUnlocked ? `
                                             <td>
                                                 <div style="display:flex; gap:6px;">
-                                                    <button class="btn-save" style="padding:5px 12px; font-size:0.78rem;" onclick="saveScopeRow(${sIdx})">💾 Simpan</button>
-                                                    <button class="btn-danger" style="padding:5px 10px; font-size:0.78rem;" onclick="deleteScopeRow(${sIdx})">🗑️ Hapus</button>
+                                                    <button class="btn-save" style="padding:5px 12px; font-size:0.78rem; display:inline-flex; align-items:center; gap:4px;" onclick="saveScopeRow(${sIdx})">${Icons.save} Save</button>
+                                                    <button class="btn-danger" style="padding:5px 10px; font-size:0.78rem; display:inline-flex; align-items:center; gap:4px;" onclick="deleteScopeRow(${sIdx})">${Icons.trash} Delete</button>
                                                 </div>
                                             </td>
                                         ` : ''}
@@ -4849,16 +4986,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 el.classList.remove('open');
                 el.style.display = 'none';
                 if(arrow) {
-                    if(id === 'add-scope-form') arrow.innerText = '➕ Tambah Scope';
-                    else arrow.innerText = '▼ Buka Form';
+                    if(id === 'add-scope-form') arrow.innerText = 'Add Scope';
+                    else arrow.innerText = 'Add';
                 }
             } else {
                 openCardIds.add(id);
                 el.classList.add('open');
                 el.style.display = 'block';
                 if(arrow) {
-                    if(id === 'add-scope-form') arrow.innerText = '▲ Tutup Scope';
-                    else arrow.innerText = '▲ Tutup Form';
+                    if(id === 'add-scope-form') arrow.innerText = 'Close Scope';
+                    else arrow.innerText = 'Close Form';
                 }
             }
         }
@@ -4866,7 +5003,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         /* ---------------- FINDING & PHOTO MODAL ---------------- */
         async function openFindingModal(itemType, id, title, area, temuan, tindakLanjut, instType = '') {
             activeFinding = { itemType, id, title, area, temuan, tindakLanjut, instType };
-            document.getElementById('modal-finding-title').innerText = `📷 Bukti & Temuan: ${id}`;
+            document.getElementById('modal-finding-title').innerText = `Findings & Photos: ${id}`;
             document.getElementById('modal-finding-subtitle').innerText = `${title} (${area || 'GENERAL'})`;
             document.getElementById('modal-finding-text').value = temuan || '';
             document.getElementById('modal-tl-text').value = tindakLanjut || '';
@@ -4893,13 +5030,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             document.getElementById('modal-photo-count').innerText = photos.length;
             const grid = document.getElementById('modal-photo-grid');
             if(photos.length === 0) {
-                grid.innerHTML = '<div style="font-size:0.8rem; color:var(--text-muted); grid-column:span 4; padding:8px 0;">Belum ada foto yang diunggah.</div>';
+                grid.innerHTML = '<div style="font-size:0.8rem; color:var(--text-muted); grid-column:span 4; padding:8px 0;">No photos uploaded yet.</div>';
                 return;
             }
             grid.innerHTML = photos.map(p => `
                 <div class="photo-thumb-box">
-                    <img src="${p.url}" alt="${p.filename}" onclick="openLightbox('${p.url}')" title="Klik untuk perbesar">
-                    <button class="photo-delete-btn" onclick="deleteModalPhoto('${p.filename}')" title="Hapus foto ini">🗑️</button>
+                    <img src="${p.url}" alt="${p.filename}" onclick="openLightbox('${p.url}')" title="Click to enlarge">
+                    <button class="photo-delete-btn" onclick="deleteModalPhoto('${p.filename}')" title="Delete this photo"><svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                 </div>
             `).join('');
         }
@@ -4938,11 +5075,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         });
                         const result = await res.json();
                         if(result.status === 'success') {
-                            showToast(`Foto '${file.name}' berhasil disimpan!`, 'success');
+                            showToast(`Photo '${file.name}' saved successfully!`, 'success');
                             renderModalPhotos(result.photos || []);
                             loadData();
                         } else {
-                            showToast(result.message || 'Gagal menyimpan foto', 'error');
+                            showToast(result.message || 'Failed to save photo', 'error');
                         }
                     } catch(err) {
                         showToast('Error uploading photo: ' + err.message, 'error');
@@ -4954,7 +5091,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         async function deleteModalPhoto(filename) {
             if(!activeFinding || !filename) return;
-            if(!confirm(`Hapus foto ${filename}?`)) return;
+            if(!confirm(`Delete photo ${filename}?`)) return;
 
             try {
                 const payload = {
@@ -4971,12 +5108,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast('Foto berhasil dihapus', 'info');
+                    showToast('Photo deleted successfully', 'info');
                     renderModalPhotos(result.photos || []);
                     loadData();
                 }
             } catch(e) {
-                showToast('Gagal menghapus foto', 'error');
+                showToast('Failed to delete photo', 'error');
             }
         }
 
@@ -5000,11 +5137,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
-                showToast('Temuan dan rekomendasi tindak lanjut berhasil disimpan!', 'success');
+                showToast('Field findings and recommendations saved successfully!', 'success');
                 closeFindingModal();
                 loadData();
             } catch(e) {
-                showToast('Gagal menyimpan temuan', 'error');
+                showToast('Failed to save findings', 'error');
             }
         }
 
@@ -5129,7 +5266,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const cur = new Date(startDateObj);
                 cur.setDate(cur.getDate() + i);
                 const ymd = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
-                const shortLabel = `${cur.getDate()} ${cur.toLocaleString('id-ID', { month: 'short' })}`;
+                const shortLabel = `${cur.getDate()} ${cur.toLocaleString('en-US', { month: 'short' })}`;
                 const time = cur.getTime();
 
                 const x = totalDays > 1 ? (i / (totalDays - 1)) : 1.0;
@@ -5193,9 +5330,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return `
             <div style="margin-top:18px; margin-bottom:14px; background:var(--bg-sub); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:12px; page-break-inside:avoid;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                    <div style="font-size:0.88rem; font-weight:800; color:var(--primary);">📈 KURVA-S MONITORING PROGRESS OUTAGE UNIT ${currentUnit} (TARGET VS REALISASI)</div>
+                    <div style="font-size:0.88rem; font-weight:800; color:var(--primary);">OUTAGE UNIT ${currentUnit} PROGRESS S-CURVE (TARGET VS ACTUAL)</div>
                     <div style="font-size:0.8rem; font-weight:700; color:${variance >= 0 ? '#10b981' : '#f43f5e'};">
-                        Realisasi: ${latestActual.actualPct}% &bull; Target: ${latestActual.targetPct}% (${variance >= 0 ? '+' : ''}${variance}% Deviasi)
+                        Actual: ${latestActual.actualPct}% &bull; Target: ${latestActual.targetPct}% (${variance >= 0 ? '+' : ''}${variance}% Variance)
                     </div>
                 </div>
                 <svg viewBox="0 0 ${svgW} ${svgH}" style="width:100%; height:auto; background:var(--bg-card); border-radius:var(--radius-sm); border:1px solid var(--border-color);">
@@ -5230,10 +5367,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     </defs>
                 </svg>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:0.75rem; color:var(--text-muted);">
-                    <div>Total Sub-Task WO: <strong>${totalTasks} sub-task</strong> &bull; Sub-Task Selesai: <strong style="color:var(--primary);">${latestActual.cumActual} sub-task (${latestActual.actualPct}%)</strong></div>
+                    <div>Total Sub-Task WO: <strong>${totalTasks} sub-tasks</strong> &bull; Completed Sub-Tasks: <strong style="color:var(--primary);">${latestActual.cumActual} sub-tasks (${latestActual.actualPct}%)</strong></div>
                     <div style="display:flex; gap:12px;">
-                        <span><span style="width:10px; height:3px; background:var(--primary); display:inline-block; vertical-align:middle; border-radius:1px;"></span> Realisasi Aktual</span>
-                        <span><span style="width:10px; height:2px; background:#94a3b8; border-top:2px dashed #94a3b8; display:inline-block; vertical-align:middle;"></span> Target Rencana</span>
+                        <span><span style="width:10px; height:3px; background:var(--primary); display:inline-block; vertical-align:middle; border-radius:1px;"></span> Actual Realization</span>
+                        <span><span style="width:10px; height:2px; background:#94a3b8; border-top:2px dashed #94a3b8; display:inline-block; vertical-align:middle;"></span> S-Curve Target</span>
                     </div>
                 </div>
             </div>`;
@@ -5257,7 +5394,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if(!container || !fullData || !fullData.summary) return;
             
             const s = fullData.summary;
-            const printDateStr = new Date().toLocaleString('id-ID');
+            const printDateStr = new Date().toLocaleString('en-US');
             
             if(currentReportType === 'harian') {
                 renderHarianReport(container, s, printDateStr);
@@ -5270,12 +5407,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
         }
 
-        /* OPSI 1: Laporan Progress Harian & Temuan (WO, Actuator, Instruments) */
+        /* OPSI 1: Daily Progress & Findings Report */
         function renderHarianReport(container, s, printDateStr) {
             const startYMD = document.getElementById('report-start-date').value;
             const endYMD = document.getElementById('report-end-date').value;
-            const startDisp = startYMD ? formatDateForStorage(startYMD) : 'Awal';
-            const endDisp = endYMD ? formatDateForStorage(endYMD) : 'Hari Ini';
+            const startDisp = startYMD ? formatDateForStorage(startYMD) : 'Start';
+            const endDisp = endYMD ? formatDateForStorage(endYMD) : 'Today';
 
             const completedTasks = [];
             
@@ -5302,7 +5439,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         type: 'Work Order',
                         code: w.no_wo,
                         item_name: w.job_description,
-                        subtask: w.status === 'FINISH' ? 'Pekerjaan WO Selesai (100%)' : `Progress WO (${w.persen_progress}%)`,
+                        subtask: w.status === 'FINISH' ? 'Work Order Completed (100%)' : `WO Progress (${w.persen_progress}%)`,
                         area: w.area || 'GENERAL',
                         pic: w.pic || '-',
                         date: w.tanggal_finish || '-'
@@ -5316,7 +5453,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const isFunc = !!a.function_test;
                 const isDone = isGen && isFunc;
                 if((isGen || isFunc) && isDateInRange(a.finish_date, startYMD, endYMD)) {
-                    let desc = isDone ? 'General Inspection & Function Test Selesai (100% FINISH)' : (isGen ? 'General Inspection Selesai (50%)' : 'Function Test Selesai (50%)');
+                    let desc = isDone ? 'General Inspection & Function Test Completed (100% FINISH)' : (isGen ? 'General Inspection Completed (50%)' : 'Function Test Completed (50%)');
                     if(a.remarks) desc += ` [${a.remarks}]`;
                     completedTasks.push({
                         type: 'Actuator Valve',
@@ -5337,7 +5474,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     const isCalib = !!inst.kalibrasi;
                     const instDate = inst.tanggal || inst.finish_date || inst.dated;
                     if((isVerif || isCalib) && isDateInRange(instDate, startYMD, endYMD)) {
-                        let desc = isVerif ? 'Kalibrasi & Verifikasi Selesai (100% DONE)' : 'Kalibrasi Selesai (In Progress)';
+                        let desc = isVerif ? 'Calibration & Verification Finished (100% DONE)' : 'Calibration Completed (In Progress)';
                         if(inst.remarks) desc += ` [${inst.remarks}]`;
                         completedTasks.push({
                             type: typeName,
@@ -5345,7 +5482,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             item_name: inst.equipment || inst.description || typeName,
                             subtask: desc,
                             area: inst.area || 'GENERAL',
-                            pic: inst.pic || 'Tim EIC',
+                            pic: inst.pic || 'EIC Team',
                             date: instDate || '-'
                         });
                     }
@@ -5365,8 +5502,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             code: item[codeField] || 'Item',
                             desc: item[descField] || item.equipment || item.job_description || '-',
                             area: item.area || 'GENERAL',
-                            temuan: item.temuan || '(Belum ada deskripsi temuan, tercatat foto lampiran)',
-                            tindak_lanjut: item.tindak_lanjut || 'Menunggu verifikasi lapangan',
+                            temuan: item.temuan || '(No defect description, field photo documentation logged)',
+                            tindak_lanjut: item.tindak_lanjut || 'Pending field verification',
                             foto_count: item.jumlah_foto || 0
                         });
                     }
@@ -5383,58 +5520,58 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div class="report-header-box">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #334155; padding-bottom:12px; margin-bottom:16px;">
                         <div>
-                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">⚡ PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
-                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">LAPORAN PROGRESS HARIAN OUTAGE (WO, ACTUATOR & INSTRUMENT)</h2>
-                            <div style="font-size:0.85rem; color:var(--text-muted);">Monitoring Progress Harian & Rekapitulasi Temuan Pekerjaan Unit ${currentUnit}</div>
+                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
+                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">DAILY OUTAGE PROGRESS REPORT (WO, ACTUATOR & INSTRUMENTS)</h2>
+                            <div style="font-size:0.85rem; color:var(--text-muted);">Daily Progress Monitoring & Field Findings Summary Unit ${currentUnit}</div>
                         </div>
                         <div style="text-align:right; font-size:0.8rem; color:var(--text-muted);">
-                            <div><strong>Periode Update:</strong> ${startDisp} s/d ${endDisp}</div>
-                            <div><strong>Waktu Cetak:</strong> ${printDateStr}</div>
+                            <div><strong>Period:</strong> ${startDisp} to ${endDisp}</div>
+                            <div><strong>Printed:</strong> ${printDateStr}</div>
                             <div style="color:var(--primary); font-weight:700; margin-top:2px;">UNIT ${currentUnit}</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="report-section-title">📊 1. RINGKASAN PROGRESS KESELURUHAN (UNIT ${currentUnit})</div>
+                <div class="report-section-title">1. OVERALL PROGRESS SUMMARY (UNIT ${currentUnit})</div>
                 <div class="report-kpi-grid" style="grid-template-columns: repeat(3, 1fr);">
                     <div class="report-kpi-card">
-                        <div class="report-kpi-lbl">WORK ORDERS (SUB-TASK)</div>
+                        <div class="report-kpi-lbl">WORK ORDERS (SUB-TASKS)</div>
                         <div class="report-kpi-val">${s.wo.pct}%</div>
-                        <div class="report-kpi-sub">${s.wo.subtask_done} / ${s.wo.subtask_total} Sub-task (${s.wo.finish}/${s.wo.total} WO Finish)</div>
+                        <div class="report-kpi-sub">${s.wo.subtask_done} / ${s.wo.subtask_total} Sub-tasks (${s.wo.finish}/${s.wo.total} WO Finish)</div>
                     </div>
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">ACTUATOR VALVES</div>
                         <div class="report-kpi-val">${s.actuator.pct}%</div>
-                        <div class="report-kpi-sub">${s.actuator.subtask_done} / ${s.actuator.subtask_total} Test (${s.actuator.finish}/${s.actuator.total} Valve Finish)</div>
+                        <div class="report-kpi-sub">${s.actuator.subtask_done} / ${s.actuator.subtask_total} Tests (${s.actuator.finish}/${s.actuator.total} Valve Finish)</div>
                     </div>
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">INSTRUMENTS (TX & PSW)</div>
                         <div class="report-kpi-val">${s.instrument.pct}%</div>
-                        <div class="report-kpi-sub">${s.instrument.done} / ${s.instrument.total} Selesai Verifikasi</div>
+                        <div class="report-kpi-sub">${s.instrument.done} / ${s.instrument.total} Verification Finished</div>
                     </div>
                 </div>
 
                 ${generateSCurveHTMLForReport()}
 
                 <div class="report-section-title" style="margin-top:22px;">
-                    📋 2. DAFTAR UPDATE PEKERJAAN YANG DISELESAIKAN (WO, ACTUATOR & INSTRUMENT)
-                    <span style="font-size:0.8rem; font-weight:600; color:var(--text-muted); float:right;">Total: ${completedTasks.length} Item Update</span>
+                    2. COMPLETED JOB UPDATES LOG (WO, ACTUATOR & INSTRUMENTS)
+                    <span style="font-size:0.8rem; font-weight:600; color:var(--text-muted); float:right;">Total: ${completedTasks.length} Completed Items</span>
                 </div>
                 ${completedTasks.length === 0 ? `
                     <div style="padding:14px; background:var(--bg-sub); border:1px dashed var(--border-color); border-radius:var(--radius-sm); font-size:0.85rem; color:var(--text-muted); text-align:center;">
-                        ℹ️ Tidak ada update sub-task, actuator valve, atau instrumen yang tercatat selesai pada rentang tanggal <strong>${startDisp} s/d ${endDisp}</strong>.
+                        ℹ️ No sub-tasks, actuator valves, or instruments recorded completed between <strong>${startDisp} to ${endDisp}</strong>.
                     </div>
                 ` : `
                     <table class="report-table">
                         <thead>
                             <tr>
                                 <th style="width:35px;">No</th>
-                                <th style="width:115px;">Kategori</th>
-                                <th style="width:135px;">No WO / Tag KKS</th>
-                                <th>Uraian Pekerjaan / Sub-Task / Status Update</th>
+                                <th style="width:115px;">Category</th>
+                                <th style="width:135px;">WO No / KKS Tag</th>
+                                <th>Task Description / Sub-Task / Progress Update</th>
                                 <th style="width:110px;">Area</th>
                                 <th style="width:110px;">PIC</th>
-                                <th style="width:90px; text-align:center;">Tgl Update</th>
+                                <th style="width:90px; text-align:center;">Date Completed</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -5457,24 +5594,24 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 `}
 
                 <div class="report-section-title" style="margin-top:24px;">
-                    ⚠️ 3. REKAPITULASI TEMUAN LAPANGAN & TINDAK LANJUT (ACTIVE FINDINGS)
-                    <span style="font-size:0.8rem; font-weight:600; color:var(--text-muted); float:right;">Total: ${findingsList.length} Temuan</span>
+                    3. FIELD FINDINGS & CORRECTIVE ACTION SUMMARY (ACTIVE FINDINGS)
+                    <span style="font-size:0.8rem; font-weight:600; color:var(--text-muted); float:right;">Total: ${findingsList.length} Findings</span>
                 </div>
                 ${findingsList.length === 0 ? `
                     <div style="padding:14px; background:var(--bg-sub); border:1px dashed var(--border-color); border-radius:var(--radius-sm); font-size:0.85rem; color:#10b981; text-align:center;">
-                        ✅ Nihil. Seluruh peralatan dan instrumen dalam kondisi normal tanpa catatan temuan terbuka.
+                        Nil. All equipment and instrumentation are in normal operating condition with no open findings.
                     </div>
                 ` : `
                     <table class="report-table">
                         <thead>
                             <tr>
                                 <th style="width:35px;">No</th>
-                                <th style="width:110px;">Kategori</th>
-                                <th style="width:130px;">No WO / Tag</th>
+                                <th style="width:110px;">Category</th>
+                                <th style="width:130px;">WO / Tag</th>
                                 <th style="width:160px;">Equipment</th>
-                                <th>Uraian Temuan Masalah</th>
-                                <th>Rekomendasi Tindak Lanjut</th>
-                                <th style="width:75px; text-align:center;">Foto</th>
+                                <th>Defect / Finding Details</th>
+                                <th>Recommended Action Plan</th>
+                                <th style="width:75px; text-align:center;">Photos</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -5486,7 +5623,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <td style="font-weight:600; font-size:0.82rem;">${f.desc}<div style="font-size:0.75rem; color:var(--text-muted);">${f.area}</div></td>
                                     <td style="color:#fca5a5; font-size:0.82rem;">${f.temuan}</td>
                                     <td style="color:#fef08a; font-size:0.82rem;">${f.tindak_lanjut}</td>
-                                    <td style="text-align:center; font-size:0.8rem; font-weight:700;">${f.foto_count > 0 ? f.foto_count + ' 📷' : '-'}</td>
+                                    <td style="text-align:center; font-size:0.8rem; font-weight:700;">${f.foto_count > 0 ? f.foto_count + ' Photos' : '-'}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -5496,7 +5633,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             container.innerHTML = html;
         }
 
-        /* OPSI 2: Laporan Work Order Keseluruhan & Detail Sub-Task */
+        /* OPSI 2: Full Work Orders & Detailed Sub-Tasks Report */
         function renderWODetailReport(container, s, printDateStr) {
             const woList = fullData.work_orders || [];
             let html = `
@@ -5504,46 +5641,46 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div class="report-header-box">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #334155; padding-bottom:12px; margin-bottom:16px;">
                         <div>
-                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">⚡ PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
-                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">LAPORAN STATUS WORK ORDER & DETAIL SUB-TASK LENGKAP</h2>
-                            <div style="font-size:0.85rem; color:var(--text-muted);">Rekapitulasi Seluruh Pekerjaan Work Order Unit ${currentUnit} Beserta Rincian Sub-Task</div>
+                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
+                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">FULL WORK ORDER STATUS & SUB-TASK DETAILS REPORT</h2>
+                            <div style="font-size:0.85rem; color:var(--text-muted);">Summary of All Work Orders & Detailed Sub-Task Checklists for Unit ${currentUnit}</div>
                         </div>
                         <div style="text-align:right; font-size:0.8rem; color:var(--text-muted);">
-                            <div><strong>Total WO:</strong> ${woList.length} Pekerjaan</div>
-                            <div><strong>Waktu Cetak:</strong> ${printDateStr}</div>
+                            <div><strong>Total WOs:</strong> ${woList.length} Jobs</div>
+                            <div><strong>Printed:</strong> ${printDateStr}</div>
                             <div style="color:var(--primary); font-weight:700; margin-top:2px;">UNIT ${currentUnit}</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="report-section-title">📊 1. RINGKASAN PROGRESS WORK ORDERS</div>
+                <div class="report-section-title">1. WORK ORDERS PROGRESS SUMMARY</div>
                 <div class="report-kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">TOTAL WORK ORDERS</div>
                         <div class="report-kpi-val">${s.wo.total}</div>
-                        <div class="report-kpi-sub">Total Item Pekerjaan</div>
+                        <div class="report-kpi-sub">Total WO Items</div>
                     </div>
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">WO FINISH (100%)</div>
                         <div class="report-kpi-val" style="color:var(--status-finish);">${s.wo.finish}</div>
-                        <div class="report-kpi-sub">Pekerjaan Selesai Penuh</div>
+                        <div class="report-kpi-sub">Fully Completed WOs</div>
                     </div>
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">WO IN PROGRESS</div>
                         <div class="report-kpi-val" style="color:#38bdf8;">${s.wo.in_progress}</div>
-                        <div class="report-kpi-sub">Dalam Proses Pengerjaan</div>
+                        <div class="report-kpi-sub">In-Progress WOs</div>
                     </div>
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">SUB-TASK PROGRESS</div>
                         <div class="report-kpi-val">${s.wo.pct}%</div>
-                        <div class="report-kpi-sub">${s.wo.subtask_done} / ${s.wo.subtask_total} Sub-Task Selesai</div>
+                        <div class="report-kpi-sub">${s.wo.subtask_done} / ${s.wo.subtask_total} Sub-Tasks Done</div>
                     </div>
                 </div>
 
                 ${generateSCurveHTMLForReport()}
 
                 <div class="report-section-title" style="margin-top:22px;">
-                    📋 2. RINCIAN SELURUH WORK ORDER & CHECKLIST SUB-TASK (${woList.length} WO)
+                    2. COMPREHENSIVE WORK ORDER & SUB-TASK DETAILS (${woList.length} WOs)
                 </div>
 
                 <div style="display:flex; flex-direction:column; gap:16px;">
@@ -5567,16 +5704,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </div>
 
                             ${totalCount === 0 ? `
-                                <div style="font-size:0.8rem; color:var(--text-muted); padding:4px 0;">(Tidak ada rincian sub-task)</div>
+                                <div style="font-size:0.8rem; color:var(--text-muted); padding:4px 0;">(No sub-task checklist recorded)</div>
                             ` : `
                                 <table class="report-table" style="margin-bottom:4px;">
                                     <thead>
                                         <tr>
                                             <th style="width:30px;">No</th>
-                                            <th>Uraian Checklist Sub-Task (${doneCount} / ${totalCount} Selesai)</th>
+                                            <th>Sub-Task Description (${doneCount} / ${totalCount} Completed)</th>
                                             <th style="width:110px; text-align:center;">Status</th>
-                                            <th style="width:100px; text-align:center;">Tgl Selesai</th>
-                                            <th style="width:110px;">PIC Sub-Task</th>
+                                            <th style="width:100px; text-align:center;">Finish Date</th>
+                                            <th style="width:110px;">Sub-Task PIC</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -5588,7 +5725,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                                 </td>
                                                 <td style="text-align:center;">
                                                     <span style="font-size:0.75rem; font-weight:700; color:${c.selesai ? 'var(--status-finish)' : 'var(--text-muted)'};">
-                                                        ${c.selesai ? '✅ Selesai' : '⬜ Belum'}
+                                                        ${c.selesai ? 'Done' : 'Pending'}
                                                     </span>
                                                 </td>
                                                 <td style="text-align:center; font-family:'JetBrains Mono'; font-size:0.78rem; color:var(--text-muted);">${c.tanggal || '-'}</td>
@@ -5601,9 +5738,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                             ${(w.temuan || (w.jumlah_foto > 0)) ? `
                                 <div style="margin-top:8px; padding:6px 10px; background:rgba(244,63,94,0.08); border:1px solid rgba(244,63,94,0.25); border-radius:4px; font-size:0.8rem;">
-                                    <strong style="color:#fda4af;">⚠️ Temuan:</strong> ${w.temuan || '(Tercatat bukti foto)'} &bull; 
-                                    <strong style="color:#fef08a;">Tindak Lanjut:</strong> ${w.tindak_lanjut || 'Menunggu verifikasi'} 
-                                    ${w.jumlah_foto > 0 ? `(${w.jumlah_foto} 📷 Foto)` : ''}
+                                    <strong style="color:#fda4af;">Finding:</strong> ${w.temuan || '(Logged photo documentation)'} &bull; 
+                                    <strong style="color:#fef08a;">Action Plan:</strong> ${w.tindak_lanjut || 'Pending verification'} 
+                                    ${w.jumlah_foto > 0 ? `(${w.jumlah_foto} Photos)` : ''}
                                 </div>
                             ` : ''}
                         </div>`;
@@ -5613,7 +5750,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             container.innerHTML = html;
         }
 
-        /* OPSI 3: Laporan Actuator Valves Keseluruhan */
+        /* OPSI 3: Full Actuator Valves Report */
         function renderActuatorReport(container, s, printDateStr) {
             const actList = fullData.actuators || [];
             let html = `
@@ -5621,44 +5758,44 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div class="report-header-box">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #334155; padding-bottom:12px; margin-bottom:16px;">
                         <div>
-                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">⚡ PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
-                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">LAPORAN MONITORING ACTUATOR VALVES KESELURUHAN</h2>
-                            <div style="font-size:0.85rem; color:var(--text-muted);">Status General Inspection, Function Test & Temuan Actuator Unit ${currentUnit}</div>
+                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
+                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">COMPREHENSIVE ACTUATOR VALVES MONITORING REPORT</h2>
+                            <div style="font-size:0.85rem; color:var(--text-muted);">Status of General Inspection, Function Test & Findings for Unit ${currentUnit}</div>
                         </div>
                         <div style="text-align:right; font-size:0.8rem; color:var(--text-muted);">
-                            <div><strong>Total Actuator:</strong> ${actList.length} Valve</div>
-                            <div><strong>Waktu Cetak:</strong> ${printDateStr}</div>
+                            <div><strong>Total Actuators:</strong> ${actList.length} Valves</div>
+                            <div><strong>Printed:</strong> ${printDateStr}</div>
                             <div style="color:var(--primary); font-weight:700; margin-top:2px;">UNIT ${currentUnit}</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="report-section-title">📊 1. RINGKASAN PROGRESS ACTUATOR VALVES</div>
+                <div class="report-section-title">1. ACTUATOR VALVES PROGRESS SUMMARY</div>
                 <div class="report-kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">TOTAL ACTUATOR VALVES</div>
                         <div class="report-kpi-val">${s.actuator.total}</div>
-                        <div class="report-kpi-sub">Total Valve Terjadwal</div>
+                        <div class="report-kpi-sub">Total Scheduled Valves</div>
                     </div>
                     <div class="report-kpi-card">
-                        <div class="report-kpi-lbl">VALVE SELESAI (100%)</div>
+                        <div class="report-kpi-lbl">VALVES FINISH (100%)</div>
                         <div class="report-kpi-val" style="color:var(--status-finish);">${s.actuator.finish}</div>
-                        <div class="report-kpi-sub">Insp & Func Selesai Penuh</div>
+                        <div class="report-kpi-sub">Insp & Func Completed</div>
                     </div>
                     <div class="report-kpi-card">
-                        <div class="report-kpi-lbl">VALVE IN PROGRESS</div>
+                        <div class="report-kpi-lbl">VALVES IN PROGRESS</div>
                         <div class="report-kpi-val" style="color:#38bdf8;">${s.actuator.in_progress}</div>
-                        <div class="report-kpi-sub">Selesai Salah Satu Tahap</div>
+                        <div class="report-kpi-sub">One Stage Completed</div>
                     </div>
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">OVERALL PROGRESS</div>
                         <div class="report-kpi-val">${s.actuator.pct}%</div>
-                        <div class="report-kpi-sub">${s.actuator.subtask_done} / ${s.actuator.subtask_total} Uji Selesai</div>
+                        <div class="report-kpi-sub">${s.actuator.subtask_done} / ${s.actuator.subtask_total} Tests Completed</div>
                     </div>
                 </div>
 
                 <div class="report-section-title" style="margin-top:22px;">
-                    📋 2. TABEL LENGKAP STATUS ACTUATOR VALVES (${actList.length} Valve)
+                    2. FULL ACTUATOR VALVES STATUS TABLE (${actList.length} Valves)
                 </div>
 
                 <table class="report-table">
@@ -5666,15 +5803,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <tr>
                             <th style="width:30px;">No</th>
                             <th style="width:120px;">Equipment ID</th>
-                            <th style="width:110px;">KKS / Tag</th>
-                            <th>Deskripsi Actuator Valve</th>
+                            <th style="width:110px;">KKS Tag</th>
+                            <th>Actuator Valve Description</th>
                             <th style="width:85px;">Area</th>
                             <th style="width:75px; text-align:center;">General Insp</th>
                             <th style="width:75px; text-align:center;">Function Test</th>
                             <th style="width:65px; text-align:center;">% Prog</th>
                             <th style="width:85px; text-align:center;">Status</th>
                             <th style="width:85px;">PIC</th>
-                            <th style="width:85px; text-align:center;">Tgl Finish</th>
+                            <th style="width:85px; text-align:center;">Finish Date</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5686,15 +5823,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <td style="font-weight:600; font-size:0.83rem;">
                                     ${a.equipment_description}
                                     ${(a.temuan || (a.jumlah_foto > 0)) ? `
-                                        <div style="font-size:0.75rem; color:#fda4af; font-weight:normal; margin-top:2px;">⚠️ ${a.temuan || 'Tercatat foto'}</div>
+                                        <div style="font-size:0.75rem; color:#fda4af; font-weight:normal; margin-top:2px;">Finding: ${a.temuan || 'Photo logged'}</div>
                                     ` : ''}
                                 </td>
                                 <td><span style="font-size:0.8rem; color:var(--text-muted);">${a.area || 'BOILER'}</span></td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${a.general_inspection ? 'var(--status-finish)' : 'var(--text-muted)'};">
-                                    ${a.general_inspection ? '✅ OK' : '⬜ Belum'}
+                                    ${a.general_inspection ? 'OK' : 'Pending'}
                                 </td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${a.function_test ? 'var(--status-finish)' : 'var(--text-muted)'};">
-                                    ${a.function_test ? '✅ OK' : '⬜ Belum'}
+                                    ${a.function_test ? 'OK' : 'Pending'}
                                 </td>
                                 <td style="text-align:center; font-family:'JetBrains Mono'; font-weight:800;">${a.persen_progress || 0}%</td>
                                 <td style="text-align:center;">
@@ -5712,7 +5849,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             container.innerHTML = html;
         }
 
-        /* OPSI 4: Laporan Instruments (TX & PSW) Keseluruhan */
+        /* OPSI 4: Full Instruments (TX & PSW) Report */
         function renderInstrumentsReport(container, s, printDateStr) {
             const ptxList = fullData.pressure_tx || [];
             const ttxList = fullData.temperature_tx || [];
@@ -5724,57 +5861,57 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div class="report-header-box">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #334155; padding-bottom:12px; margin-bottom:16px;">
                         <div>
-                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">⚡ PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
-                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">LAPORAN MONITORING INSTRUMENTS KESELURUHAN</h2>
-                            <div style="font-size:0.85rem; color:var(--text-muted);">Status Kalibrasi & Verifikasi Transmitter (PTX, TTX) dan Pressure Switch Unit ${currentUnit}</div>
+                            <div style="font-size:1.1rem; font-weight:800; color:var(--primary); letter-spacing:0.5px;">PLTU MSW &bull; SECTION ELECTRIC, INSTRUMENT & CONTROL</div>
+                            <h2 style="font-size:1.25rem; margin:4px 0 2px 0; color:#fff;">COMPREHENSIVE INSTRUMENTS MONITORING REPORT</h2>
+                            <div style="font-size:0.85rem; color:var(--text-muted);">Status of Calibration & Verification for Transmitters (PTX, TTX) and Pressure Switches Unit ${currentUnit}</div>
                         </div>
                         <div style="text-align:right; font-size:0.8rem; color:var(--text-muted);">
-                            <div><strong>Total Instrumen:</strong> ${totalInst} Item</div>
-                            <div><strong>Waktu Cetak:</strong> ${printDateStr}</div>
+                            <div><strong>Total Instruments:</strong> ${totalInst} Items</div>
+                            <div><strong>Printed:</strong> ${printDateStr}</div>
                             <div style="color:var(--primary); font-weight:700; margin-top:2px;">UNIT ${currentUnit}</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="report-section-title">📊 1. RINGKASAN STATUS INSTRUMENTS</div>
+                <div class="report-section-title">1. INSTRUMENTS STATUS SUMMARY</div>
                 <div class="report-kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
                     <div class="report-kpi-card">
                         <div class="report-kpi-lbl">TOTAL INSTRUMENTS</div>
                         <div class="report-kpi-val">${s.instrument.total}</div>
-                        <div class="report-kpi-sub">PTX, TTX, dan Pressure Switch</div>
+                        <div class="report-kpi-sub">PTX, TTX, and Pressure Switches</div>
                     </div>
                     <div class="report-kpi-card">
-                        <div class="report-kpi-lbl">SELESAI VERIFIKASI (DONE)</div>
+                        <div class="report-kpi-lbl">VERIFICATION FINISHED (DONE)</div>
                         <div class="report-kpi-val" style="color:var(--status-finish);">${s.instrument.done}</div>
-                        <div class="report-kpi-sub">Penentu Finish Tercapai</div>
+                        <div class="report-kpi-sub">100% Completion Milestone</div>
                     </div>
                     <div class="report-kpi-card">
-                        <div class="report-kpi-lbl">IN PROGRESS (KALIBRASI)</div>
+                        <div class="report-kpi-lbl">IN PROGRESS (CALIBRATION)</div>
                         <div class="report-kpi-val" style="color:#38bdf8;">${s.instrument.calib_done || 0}</div>
-                        <div class="report-kpi-sub">Kalibrasi Telah Dilakukan</div>
+                        <div class="report-kpi-sub">Calibration Executed</div>
                     </div>
                     <div class="report-kpi-card">
-                        <div class="report-kpi-lbl">VERIFIKASI PROGRESS</div>
+                        <div class="report-kpi-lbl">VERIFICATION PROGRESS</div>
                         <div class="report-kpi-val">${s.instrument.pct}%</div>
-                        <div class="report-kpi-sub">${s.instrument.done} / ${s.instrument.total} Selesai Penuh</div>
+                        <div class="report-kpi-sub">${s.instrument.done} / ${s.instrument.total} Fully Finished</div>
                     </div>
                 </div>
 
-                <!-- Bagian A: Pressure Transmitter -->
+                <!-- Part A: Pressure Transmitter -->
                 <div class="report-section-title" style="margin-top:22px;">
-                    🎛️ 2A. PRESSURE TRANSMITTERS (PTX) &bull; ${ptxList.length} Item
+                    2A. PRESSURE TRANSMITTERS (PTX) &bull; ${ptxList.length} Items
                 </div>
                 <table class="report-table">
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:130px;">KKS / Tag</th>
+                            <th style="width:130px;">KKS Tag</th>
                             <th>Equipment Description</th>
                             <th style="width:120px;">Range / Unit</th>
-                            <th style="width:90px; text-align:center;">🛠️ Kalibrasi</th>
-                            <th style="width:105px; text-align:center;">🔍 Verifikasi (Done)</th>
+                            <th style="width:90px; text-align:center;">Calibration</th>
+                            <th style="width:105px; text-align:center;">Verification (Done)</th>
                             <th style="width:95px; text-align:center;">Status</th>
-                            <th>Catatan / Temuan</th>
+                            <th>Remarks / Findings</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5788,37 +5925,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <td style="font-weight:600;">${item.equipment}</td>
                                 <td style="font-size:0.8rem; color:var(--text-muted);">${item.range || '-'} ${item.eng_unit || ''}</td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isCalib ? '#38bdf8' : 'var(--text-muted)'};">
-                                    ${isCalib ? '✅ Selesai' : '⬜ Belum'}
+                                    ${isCalib ? 'Done' : 'Pending'}
                                 </td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isDone ? 'var(--status-finish)' : 'var(--text-muted)'};">
-                                    ${isDone ? '✅ Selesai' : '⬜ Belum'}
+                                    ${isDone ? 'Done' : 'Pending'}
                                 </td>
                                 <td style="text-align:center;">
                                     <span class="report-badge" style="background:${isDone ? 'rgba(16,185,129,0.15)' : (isCalib ? 'rgba(56,189,248,0.15)' : 'rgba(148,163,184,0.15)')}; color:${isDone ? 'var(--status-finish)' : (isCalib ? '#38bdf8' : '#94a3b8')};">
                                         ${isDone ? 'DONE' : (isCalib ? 'CALIB OK' : 'SCHEDULED')}
                                     </span>
                                 </td>
-                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.temuan ? '⚠️ ' + item.temuan : (item.remarks || '-')}</td>
+                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.temuan ? 'Finding: ' + item.temuan : (item.remarks || '-')}</td>
                             </tr>`;
                         }).join('')}
                     </tbody>
                 </table>
 
-                <!-- Bagian B: Temperature Transmitter -->
+                <!-- Part B: Temperature Transmitter -->
                 <div class="report-section-title" style="margin-top:22px;">
-                    🌡️ 2B. TEMPERATURE TRANSMITTERS (TTX) &bull; ${ttxList.length} Item
+                    2B. TEMPERATURE TRANSMITTERS (TTX) &bull; ${ttxList.length} Items
                 </div>
                 <table class="report-table">
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:130px;">KKS / Tag</th>
+                            <th style="width:130px;">KKS Tag</th>
                             <th>Equipment Description</th>
                             <th style="width:120px;">Range / Unit</th>
-                            <th style="width:90px; text-align:center;">🛠️ Kalibrasi</th>
-                            <th style="width:105px; text-align:center;">🔍 Verifikasi (Done)</th>
+                            <th style="width:90px; text-align:center;">Calibration</th>
+                            <th style="width:105px; text-align:center;">Verification (Done)</th>
                             <th style="width:95px; text-align:center;">Status</th>
-                            <th>Catatan / Temuan</th>
+                            <th>Remarks / Findings</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5832,39 +5969,39 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <td style="font-weight:600;">${item.equipment}</td>
                                 <td style="font-size:0.8rem; color:var(--text-muted);">${item.range || '-'} ${item.eng_unit || ''}</td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isCalib ? '#38bdf8' : 'var(--text-muted)'};">
-                                    ${isCalib ? '✅ Selesai' : '⬜ Belum'}
+                                    ${isCalib ? 'Done' : 'Pending'}
                                 </td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isDone ? 'var(--status-finish)' : 'var(--text-muted)'};">
-                                    ${isDone ? '✅ Selesai' : '⬜ Belum'}
+                                    ${isDone ? 'Done' : 'Pending'}
                                 </td>
                                 <td style="text-align:center;">
                                     <span class="report-badge" style="background:${isDone ? 'rgba(16,185,129,0.15)' : (isCalib ? 'rgba(56,189,248,0.15)' : 'rgba(148,163,184,0.15)')}; color:${isDone ? 'var(--status-finish)' : (isCalib ? '#38bdf8' : '#94a3b8')};">
                                         ${isDone ? 'DONE' : (isCalib ? 'CALIB OK' : 'SCHEDULED')}
                                     </span>
                                 </td>
-                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.temuan ? '⚠️ ' + item.temuan : (item.remarks || '-')}</td>
+                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.temuan ? 'Finding: ' + item.temuan : (item.remarks || '-')}</td>
                             </tr>`;
                         }).join('')}
                     </tbody>
                 </table>
 
-                <!-- Bagian C: Pressure Switch -->
+                <!-- Part C: Pressure Switch -->
                 <div class="report-section-title" style="margin-top:22px;">
-                    🔘 2C. PRESSURE SWITCHES (PSW) &bull; ${pswList.length} Item
+                    2C. PRESSURE SWITCHES (PSW) &bull; ${pswList.length} Items
                 </div>
                 <table class="report-table">
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:125px;">KKS / Tag</th>
+                            <th style="width:125px;">KKS Tag</th>
                             <th>Description</th>
                             <th style="width:105px;">Sub-Area</th>
                             <th style="width:100px; text-align:center;">Set Point</th>
                             <th style="width:75px; text-align:center;">Contact</th>
-                            <th style="width:85px; text-align:center;">🛠️ Kalibrasi</th>
-                            <th style="width:95px; text-align:center;">🔍 Verifikasi</th>
+                            <th style="width:85px; text-align:center;">Calibration</th>
+                            <th style="width:95px; text-align:center;">Verification</th>
                             <th style="width:90px; text-align:center;">Status</th>
-                            <th>Catatan / Temuan</th>
+                            <th>Remarks / Findings</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5890,17 +6027,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <span class="contact-badge ${contact==='NC'?'contact-nc':'contact-no'}" style="padding:1px 6px; font-size:0.72rem; min-width:auto;">${contact}</span>
                                 </td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isCalib ? '#38bdf8' : 'var(--text-muted)'};">
-                                    ${isCalib ? '✅ Selesai' : '⬜ Belum'}
+                                    ${isCalib ? 'Done' : 'Pending'}
                                 </td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isDone ? 'var(--status-finish)' : 'var(--text-muted)'};">
-                                    ${isDone ? '✅ Selesai' : '⬜ Belum'}
+                                    ${isDone ? 'Done' : 'Pending'}
                                 </td>
                                 <td style="text-align:center;">
                                     <span class="report-badge" style="background:${isDone ? 'rgba(16,185,129,0.15)' : (isCalib ? 'rgba(56,189,248,0.15)' : 'rgba(148,163,184,0.15)')}; color:${isDone ? 'var(--status-finish)' : (isCalib ? '#38bdf8' : '#94a3b8')};">
                                         ${isDone ? 'DONE' : (isCalib ? 'CALIB OK' : 'SCHEDULED')}
                                     </span>
                                 </td>
-                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.temuan ? '⚠️ ' + item.temuan : (item.remarks || '-')}</td>
+                                <td style="font-size:0.8rem; color:var(--text-muted);">${item.temuan ? 'Finding: ' + item.temuan : (item.remarks || '-')}</td>
                             </tr>`;
                         }).join('')}
                     </tbody>
@@ -6007,9 +6144,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     if(!dateBadge && rightBox) {
                         const badge = document.createElement('span');
                         badge.className = 'date-badge';
-                        badge.title = "Tanggal Dikerjakan";
+                        badge.title = "Date Completed";
                         badge.style.cssText = "font-size:0.72rem; color:var(--status-finish); font-family:'JetBrains Mono',monospace; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); padding:2px 7px; border-radius:4px;";
-                        badge.innerText = `📅 ${nowStr}`;
+                        badge.innerText = `${nowStr}`;
                         const delBtn = rightBox.querySelector('.btn-del-subtask-cross');
                         rightBox.insertBefore(badge, delBtn);
                     }
@@ -6057,7 +6194,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast(`✓ Sub-task & komponen terkait disinkronkan (${result.persen_progress}%)`, 'success', 1500);
+                    showToast(`✓ Sub-task & linked components synchronized (${result.persen_progress}%)`, 'success', 1500);
                 }
             } catch(err) {
                 console.error("Error saving quick subtask toggle:", err);
@@ -6091,7 +6228,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
             if(badgeEl) {
                 badgeEl.className = `status-badge ${isVerif ? 'badge-FINISH' : (isCalib ? 'badge-IN-PROGRESS' : 'badge-SCHED-OK')}`;
-                badgeEl.innerText = isVerif ? 'DONE (100%)' : (isCalib ? 'IN PROGRESS (Kalibrasi OK)' : 'SCHEDULED');
+                badgeEl.innerText = isVerif ? 'DONE (100%)' : (isCalib ? 'IN PROGRESS (Calibration OK)' : 'SCHEDULED');
             }
         }
 
@@ -6113,11 +6250,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast(`✓ ${field === 'verifikasi' ? 'Verifikasi' : 'Kalibrasi'} diperbarui!`, 'success', 1800);
+                    showToast(`✓ ${field === 'verifikasi' ? 'Verification' : 'Calibration'} updated!`, 'success', 1800);
                     loadData();
                 }
             } catch(e) {
-                showToast('Gagal memperbarui instrumen', 'error');
+                showToast('Failed to update instrument', 'error');
             }
         }
 
@@ -6167,10 +6304,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
-                showToast(result.message || 'WO berhasil diperbarui!', 'success');
+                showToast(result.message || 'WO updated successfully!', 'success');
                 loadData();
             } catch(e) {
-                showToast('Gagal menyimpan perubahan WO', 'error');
+                showToast('Failed to save WO changes', 'error');
             }
         }
 
@@ -6192,10 +6329,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     showToast(result.message, 'success');
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal update status actuator', 'error');
+                    showToast(result.message || 'Failed to update actuator status', 'error');
                 }
             } catch(e) {
-                showToast('Gagal update status actuator', 'error');
+                showToast('Failed to update actuator status', 'error');
             }
         }
 
@@ -6225,10 +6362,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
-                showToast(result.message || 'Actuator berhasil diperbarui!', 'success');
+                showToast(result.message || 'Actuator updated successfully!', 'success');
                 loadData();
             } catch(e) {
-                showToast('Gagal menyimpan actuator', 'error');
+                showToast('Failed to save actuator', 'error');
             }
         }
 
@@ -6254,10 +6391,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
-                showToast('Instrumen berhasil diperbarui!', 'success');
+                showToast('Instrument updated successfully!', 'success');
                 loadData();
             } catch(e) {
-                showToast('Gagal menyimpan instrumen', 'error');
+                showToast('Failed to save instrument', 'error');
             }
         }
 
@@ -6312,13 +6449,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast('✓ Set Point, Kontak & Kalibrasi Pressure Switch berhasil disimpan!', 'success');
+                    showToast('✓ Set Point, Contact & Calibration for Pressure Switch saved successfully!', 'success');
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal menyimpan Pressure Switch', 'error');
+                    showToast(result.message || 'Failed to save Pressure Switch', 'error');
                 }
             } catch(e) {
-                showToast('Gagal menyimpan kalibrasi PSW: ' + e.message, 'error');
+                showToast('Failed to save PSW calibration: ' + e.message, 'error');
             }
         }
 
@@ -6331,7 +6468,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const checklistStr = (document.getElementById('new-wo-checklist').value || '').trim();
 
             if(!noWo || !desc) {
-                showToast('No WO dan Job Description wajib diisi!', 'error');
+                showToast('WO No and Job Description are required!', 'error');
                 return;
             }
 
@@ -6343,7 +6480,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast(result.message || 'WO baru berhasil ditambahkan!', 'success');
+                    showToast(result.message || 'New WO added successfully!', 'success');
                     document.getElementById('new-wo-code').value = '';
                     document.getElementById('new-wo-desc').value = '';
                     document.getElementById('new-wo-area').value = '';
@@ -6352,15 +6489,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     toggleAccordion('add-wo-form');
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal menambah WO', 'error');
+                    showToast(result.message || 'Failed to add WO', 'error');
                 }
             } catch(e) {
-                showToast('Gagal menambah WO baru: ' + e.message, 'error');
+                showToast('Failed to add new WO: ' + e.message, 'error');
             }
         }
 
         async function deleteWO(noWo) {
-            if(!confirm(`Yakin ingin menghapus Work Order ${noWo} dan seluruh checklist subtask-nya?`)) return;
+            if(!confirm(`Are you sure you want to delete Work Order ${noWo} and all of its subtasks?`)) return;
 
             try {
                 const res = await fetch('/api/delete_wo', {
@@ -6369,10 +6506,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify({unit: currentUnit, no_wo: noWo})
                 });
                 const result = await res.json();
-                showToast(result.message || 'WO berhasil dihapus!', 'info');
+                showToast(result.message || 'WO deleted successfully!', 'info');
                 loadData();
             } catch(e) {
-                showToast('Gagal menghapus WO', 'error');
+                showToast('Failed to delete WO', 'error');
             }
         }
 
@@ -6385,7 +6522,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 subTask = (sel?.value || '').trim();
                 defaultPic = 'AMP';
                 if(!subTask) {
-                    showToast('Silakan pilih Actuator dari dropdown!', 'error');
+                    showToast('Please select an Actuator from the dropdown!', 'error');
                     return;
                 }
             } else if(mode === 'instrument') {
@@ -6393,14 +6530,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 subTask = (sel?.value || '').trim();
                 defaultPic = 'JAPA';
                 if(!subTask) {
-                    showToast('Silakan pilih Instrument dari dropdown!', 'error');
+                    showToast('Please select an Instrument from the dropdown!', 'error');
                     return;
                 }
             } else {
                 const input = document.getElementById(`new-subtask-${noWo}`);
                 subTask = (input?.value || '').trim();
                 if(!subTask) {
-                    showToast('Silakan masukkan deskripsi sub-task!', 'error');
+                    showToast('Please enter sub-task description!', 'error');
                     return;
                 }
             }
@@ -6413,20 +6550,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast(result.message || 'Sub-task berhasil ditambahkan dan disinkronkan!', 'success');
+                    showToast(result.message || 'Sub-task added and synchronized successfully!', 'success');
                     const input = document.getElementById(`new-subtask-${noWo}`);
                     if(input) input.value = '';
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal menambah sub-task', 'error');
+                    showToast(result.message || 'Failed to add sub-task', 'error');
                 }
             } catch(e) {
-                showToast('Gagal menambah sub-task: ' + e.message, 'error');
+                showToast('Failed to add sub-task: ' + e.message, 'error');
             }
         }
 
         async function deleteSubtask(noWo, subTask) {
-            if(!confirm(`Hapus sub-task "${subTask}" dari ${noWo}?`)) return;
+            if(!confirm(`Delete sub-task "${subTask}" from ${noWo}?`)) return;
 
             try {
                 const res = await fetch('/api/delete_subtask', {
@@ -6435,10 +6572,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify({unit: currentUnit, no_wo: noWo, sub_task: subTask})
                 });
                 const result = await res.json();
-                showToast(result.message || 'Sub-task berhasil dihapus!', 'info');
+                showToast(result.message || 'Sub-task deleted successfully!', 'info');
                 loadData();
             } catch(e) {
-                showToast('Gagal menghapus sub-task', 'error');
+                showToast('Failed to delete sub-task', 'error');
             }
         }
 
@@ -6450,7 +6587,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const pic = document.getElementById('new-act-pic').value;
 
             if(!eqId || !desc) {
-                showToast('Equipment ID dan Description wajib diisi!', 'error');
+                showToast('Equipment ID and Description are required!', 'error');
                 return;
             }
 
@@ -6462,7 +6599,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast(result.message || 'Actuator baru berhasil ditambahkan!', 'success');
+                    showToast(result.message || 'New Actuator added successfully!', 'success');
                     document.getElementById('new-act-id').value = '';
                     document.getElementById('new-act-desc').value = '';
                     document.getElementById('new-act-area').value = '';
@@ -6470,15 +6607,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     toggleAccordion('add-act-form');
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal menambah Actuator', 'error');
+                    showToast(result.message || 'Failed to add Actuator', 'error');
                 }
             } catch(e) {
-                showToast('Gagal menambah Actuator baru: ' + e.message, 'error');
+                showToast('Failed to add new Actuator: ' + e.message, 'error');
             }
         }
 
         async function deleteActuator(eqId) {
-            if(!confirm(`Yakin ingin menghapus Actuator Valve ${eqId}?`)) return;
+            if(!confirm(`Are you sure you want to delete Actuator Valve ${eqId}?`)) return;
 
             try {
                 const res = await fetch('/api/delete_actuator', {
@@ -6487,10 +6624,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify({unit: currentUnit, equipment_id: eqId})
                 });
                 const result = await res.json();
-                showToast(result.message || 'Actuator berhasil dihapus!', 'info');
+                showToast(result.message || 'Actuator deleted successfully!', 'info');
                 loadData();
             } catch(e) {
-                showToast('Gagal menghapus Actuator', 'error');
+                showToast('Failed to delete Actuator', 'error');
             }
         }
 
@@ -6506,7 +6643,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const contact = (document.getElementById('new-inst-contact')?.value || 'NO');
 
             if(!desc) {
-                showToast('Nama Equipment wajib diisi!', 'error');
+                showToast('Equipment Name is required!', 'error');
                 return;
             }
 
@@ -6533,7 +6670,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast(result.message || 'Instrument baru berhasil ditambahkan!', 'success');
+                    showToast(result.message || 'New Instrument added successfully!', 'success');
                     document.getElementById('new-inst-desc').value = '';
                     document.getElementById('new-inst-kks').value = '';
                     document.getElementById('new-inst-area').value = '';
@@ -6543,10 +6680,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     toggleAccordion('add-inst-form');
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal menambah Instrument', 'error');
+                    showToast(result.message || 'Failed to add Instrument', 'error');
                 }
             } catch(e) {
-                showToast('Gagal menambah Instrument baru: ' + e.message, 'error');
+                showToast('Failed to add new Instrument: ' + e.message, 'error');
             }
         }
 
@@ -6577,8 +6714,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         function toggleMasterPwdVisibility() {
             const input = document.getElementById('master-pwd-input');
+            const btn = document.getElementById('pwd-eye-btn');
             if(!input) return;
-            input.type = input.type === 'password' ? 'text' : 'password';
+            const isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            if(btn) btn.innerHTML = isPassword ? Icons.eyeOff : Icons.eye;
         }
 
         function submitMasterPassword(e) {
@@ -6591,7 +6731,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 isScopeMasterUnlocked = true;
                 sessionStorage.setItem('eic_scope_unlocked', 'true');
                 closeMasterPasswordModal();
-                showToast('✓ Akses Edit Master EIC Berhasil Dibuka!', 'success');
+                showToast('✓ Master EIC Edit Access Unlocked!', 'success');
                 renderTabContent();
             } else {
                 if(err) err.style.display = 'block';
@@ -6606,7 +6746,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         function lockMasterScope() {
             isScopeMasterUnlocked = false;
             sessionStorage.removeItem('eic_scope_unlocked');
-            showToast('🔒 Mode Edit Master EIC Berhasil Dikunci Kembali', 'info');
+            showToast('Master EIC Edit Mode Locked', 'info');
             renderTabContent();
         }
 
@@ -6618,7 +6758,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const pic = document.getElementById('new-scope-pic').value;
 
             if(!eq) {
-                showToast('Nama Equipment / Scope wajib diisi!', 'error');
+                showToast('Equipment Name / Job Scope is required!', 'error');
                 return;
             }
 
@@ -6630,21 +6770,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
-                    showToast(result.message || 'Scope Master berhasil ditambahkan!', 'success');
+                    showToast(result.message || 'Scope Master added successfully!', 'success');
                     document.getElementById('new-scope-cat').value = '';
                     document.getElementById('new-scope-eq').value = '';
                     toggleAccordion('add-scope-form');
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal menambah Scope Master', 'error');
+                    showToast(result.message || 'Failed to add Scope Master', 'error');
                 }
             } catch(e) {
-                showToast('Gagal menambah Scope: ' + e.message, 'error');
+                showToast('Failed to add Scope: ' + e.message, 'error');
             }
         }
 
         async function deleteInstrument(type, key) {
-            if(!confirm(`Yakin ingin menghapus Instrument ini?`)) return;
+            if(!confirm(`Are you sure you want to delete this Instrument?`)) return;
 
             try {
                 const res = await fetch('/api/delete_instrument', {
@@ -6653,10 +6793,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify({unit: currentUnit, type: type, no: key, kks: key})
                 });
                 const result = await res.json();
-                showToast(result.message || 'Instrument berhasil dihapus!', 'info');
+                showToast(result.message || 'Instrument deleted successfully!', 'info');
                 loadData();
             } catch(e) {
-                showToast('Gagal menghapus Instrument', 'error');
+                showToast('Failed to delete Instrument', 'error');
             }
         }
 
@@ -6665,7 +6805,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const input = document.getElementById('new-pic-input');
             const picName = (input ? input.value : '').trim();
             if(!picName) {
-                showToast('Silakan masukkan nama PIC baru.', 'error');
+                showToast('Please enter new PIC personnel name.', 'error');
                 return;
             }
 
@@ -6676,17 +6816,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify({unit: currentUnit, pic_name: picName})
                 });
                 const result = await res.json();
-                showToast(result.message || 'PIC berhasil ditambahkan!', 'success');
+                showToast(result.message || 'PIC added successfully!', 'success');
                 if(input) input.value = '';
                 loadData();
             } catch(e) {
-                showToast('Gagal menambahkan PIC', 'error');
+                showToast('Failed to add PIC', 'error');
             }
         }
 
         async function deletePic(picName) {
             if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
-            if(!confirm(`Yakin ingin menghapus PIC "${picName}" dari Master PIC?`)) return;
+            if(!confirm(`Are you sure you want to delete PIC "${picName}" from Master PICs?`)) return;
 
             try {
                 const res = await fetch('/api/delete_pic', {
@@ -6695,10 +6835,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify({unit: currentUnit, pic_name: picName})
                 });
                 const result = await res.json();
-                showToast(result.message || 'PIC berhasil dihapus dari master!', 'info');
+                showToast(result.message || 'PIC deleted from master!', 'info');
                 loadData();
             } catch(e) {
-                showToast('Gagal menghapus PIC', 'error');
+                showToast('Failed to delete PIC', 'error');
             }
         }
 
@@ -6725,10 +6865,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
-                showToast(result.message || 'Scope Master berhasil diperbarui!', 'success');
+                showToast(result.message || 'Scope Master updated successfully!', 'success');
                 loadData();
             } catch(e) {
-                showToast('Gagal memperbarui Scope Master', 'error');
+                showToast('Failed to update Scope Master', 'error');
             }
         }
 
@@ -6736,7 +6876,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
             const item = (fullData.scope_master || [])[sIdx];
             if(!item) return;
-            if(!confirm(`Yakin ingin menghapus baris Master Scope "${item.nama_equipment || ''}"?`)) return;
+            if(!confirm(`Are you sure you want to delete Master Scope row "${item.nama_equipment || ''}"?`)) return;
 
             try {
                 const res = await fetch('/api/delete_scope', {
@@ -6745,10 +6885,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     body: JSON.stringify({unit: currentUnit, row_index: item.row_index !== undefined ? item.row_index : sIdx})
                 });
                 const result = await res.json();
-                showToast(result.message || 'Baris Master Scope berhasil dihapus!', 'info');
+                showToast(result.message || 'Master Scope row deleted!', 'info');
                 loadData();
             } catch(e) {
-                showToast('Gagal menghapus baris Master Scope', 'error');
+                showToast('Failed to delete Master Scope row', 'error');
             }
         }
 
@@ -6874,10 +7014,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         function downloadExcel() {
             const url = `/api/export_excel?unit=${currentUnit}`;
-            showToast(`📥 Mengunduh Laporan Excel Unit ${currentUnit}...`, 'info', 2000);
+            showToast(`Downloading Unit ${currentUnit} Excel Report...`, 'info', 2000);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Laporan_Monitoring_Outage_EIC_Unit_${currentUnit}.xlsx`;
+            a.download = `Outage_EIC_Monitoring_Report_Unit_${currentUnit}.xlsx`;
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -6902,7 +7042,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         async function batchToggleSubtasks(noWo, action) {
             const isDone = (action === 'mark_all_done');
-            if(!confirm(`Apakah Anda yakin ingin ${isDone ? 'menandai SEMUA sub-task selesai' : 'mereset SEMUA sub-task'} untuk WO ${noWo}?`)) {
+            if(!confirm(`Are you sure you want to ${isDone ? 'mark ALL sub-tasks as DONE' : 'reset ALL sub-tasks'} for WO ${noWo}?`)) {
                 return;
             }
             try {
@@ -6917,10 +7057,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     showToast(result.message, 'success');
                     loadData();
                 } else {
-                    showToast(result.message || 'Gagal mengubah batch sub-task', 'error');
+                    showToast(result.message || 'Failed to update batch sub-tasks', 'error');
                 }
             } catch(e) {
-                showToast('Gagal memproses batch checklist', 'error');
+                showToast('Failed to process batch checklist', 'error');
             }
         }
 
@@ -7005,7 +7145,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 cur.setDate(cur.getDate() + i);
                 const ymd = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
                 const dmy = `${String(cur.getDate()).padStart(2, '0')}/${String(cur.getMonth() + 1).padStart(2, '0')}/${cur.getFullYear()}`;
-                const shortLabel = `${cur.getDate()} ${cur.toLocaleString('id-ID', { month: 'short' })}`;
+                const shortLabel = `${cur.getDate()} ${cur.toLocaleString('en-US', { month: 'short' })}`;
                 const time = cur.getTime();
 
                 // Target Planned S-Curve using normalized sigmoid
@@ -7044,9 +7184,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             if(kpiBadge) {
                 if(variance >= 0) {
-                    kpiBadge.innerHTML = `<span style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.4); padding:3px 10px; border-radius:12px;">✅ Ahead (+${variance}%)</span>`;
+                    kpiBadge.innerHTML = `<span style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.4); padding:3px 10px; border-radius:12px;">Ahead (+${variance}%)</span>`;
                 } else {
-                    kpiBadge.innerHTML = `<span style="background:rgba(244,63,94,0.15); color:#f43f5e; border:1px solid rgba(244,63,94,0.4); padding:3px 10px; border-radius:12px;">⚠️ Behind (${variance}%)</span>`;
+                    kpiBadge.innerHTML = `<span style="background:rgba(244,63,94,0.15); color:#f43f5e; border:1px solid rgba(244,63,94,0.4); padding:3px 10px; border-radius:12px;">Behind (${variance}%)</span>`;
                 }
             }
 
@@ -7114,7 +7254,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     const y = getY(pt.actualPct);
                     return `
                     <circle cx="${x}" cy="${y}" r="5" fill="var(--primary)" stroke="#fff" stroke-width="2">
-                        <title>${pt.dmy}: Selesai +${pt.daily} task | Total: ${pt.cumActual}/${totalTasks} (${pt.actualPct}%) | Target: ${pt.targetPct}%</title>
+                        <title>${pt.dmy}: Finished +${pt.daily} tasks | Cumulative: ${pt.cumActual}/${totalTasks} (${pt.actualPct}%) | Target: ${pt.targetPct}%</title>
                     </circle>
                     <text x="${x}" y="${y - 9}" fill="var(--primary)" font-size="10" font-weight="800" text-anchor="middle" font-family="'JetBrains Mono'">${pt.actualPct}%</text>`;
                 }).join('')}
@@ -7140,22 +7280,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             let kpiCardsHTML = `
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:14px;">
                 <div class="report-kpi-card" style="padding:10px;">
-                    <div class="report-kpi-lbl">Total Sub-Task WO</div>
-                    <div class="report-kpi-val" style="font-size:1.3rem;">${totalTasks} <span style="font-size:0.75rem; color:var(--text-muted);">sub-task</span></div>
-                    <div class="report-kpi-sub">Total Sub-Task Work Order</div>
+                    <div class="report-kpi-lbl">Total Sub-Tasks WO</div>
+                    <div class="report-kpi-val" style="font-size:1.3rem;">${totalTasks} <span style="font-size:0.75rem; color:var(--text-muted);">sub-tasks</span></div>
+                    <div class="report-kpi-sub">Total Sub-Task Work Orders</div>
                 </div>
                 <div class="report-kpi-card highlight" style="padding:10px;">
-                    <div class="report-kpi-lbl">Realisasi Aktual</div>
+                    <div class="report-kpi-lbl">Actual Realization</div>
                     <div class="report-kpi-val" style="font-size:1.3rem; color:var(--primary);">${latestActual.actualPct}%</div>
-                    <div class="report-kpi-sub">${latestActual.cumActual} / ${totalTasks} sub-task selesai</div>
+                    <div class="report-kpi-sub">${latestActual.cumActual} / ${totalTasks} sub-tasks completed</div>
                 </div>
                 <div class="report-kpi-card" style="padding:10px;">
-                    <div class="report-kpi-lbl">Target Rencana</div>
+                    <div class="report-kpi-lbl">Planned Target</div>
                     <div class="report-kpi-val" style="font-size:1.3rem; color:#94a3b8;">${latestActual.targetPct}%</div>
-                    <div class="report-kpi-sub">Baseline S-Curve Hari Ini</div>
+                    <div class="report-kpi-sub">Today's Baseline S-Curve</div>
                 </div>
                 <div class="report-kpi-card" style="padding:10px; border-left:3px solid ${variance >= 0 ? '#10b981' : '#f43f5e'};">
-                    <div class="report-kpi-lbl">Deviasi Progres</div>
+                    <div class="report-kpi-lbl">Progress Variance</div>
                     <div class="report-kpi-val" style="font-size:1.3rem; color:${variance >= 0 ? '#10b981' : '#f43f5e'};">${variance >= 0 ? '+' : ''}${variance}%</div>
                     <div class="report-kpi-sub">${variance >= 0 ? 'Ahead of Schedule' : 'Behind Schedule'}</div>
                 </div>
@@ -7165,15 +7305,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const activeBreakdown = timeline.filter(t => t.daily > 0 || t.cumActual !== null);
             let tableHTML = `
             <div style="margin-top:16px;">
-                <div style="font-size:0.85rem; font-weight:700; color:var(--text-main); margin-bottom:8px;">📊 Rincian Capaian Per Tanggal:</div>
+                <div style="font-size:0.85rem; font-weight:700; color:var(--text-main); margin-bottom:8px;">Daily Progress Breakdown:</div>
                 <table class="dense-table" style="font-size:0.8rem;">
                     <thead>
                         <tr>
-                            <th>Tanggal</th>
-                            <th style="text-align:center;">Task Selesai Hari Ini</th>
-                            <th style="text-align:center;">Kumulatif Realisasi</th>
-                            <th style="text-align:center;">Progres Aktual</th>
-                            <th style="text-align:center;">Target Rencana</th>
+                            <th>Date</th>
+                            <th style="text-align:center;">Tasks Completed Today</th>
+                            <th style="text-align:center;">Cumulative Realization</th>
+                            <th style="text-align:center;">Actual Progress</th>
+                            <th style="text-align:center;">Planned Target</th>
                             <th style="text-align:center;">Status</th>
                         </tr>
                     </thead>
@@ -7182,8 +7322,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             const dev = pt.actualPct !== null ? Math.round((pt.actualPct - pt.targetPct) * 10) / 10 : null;
                             return `
                             <tr>
-                                <td style="font-family:'JetBrains Mono'; font-weight:700;">📅 ${pt.dmy}</td>
-                                <td style="text-align:center; color:var(--status-finish); font-weight:700;">${pt.daily > 0 ? '+' + pt.daily + ' task' : '-'}</td>
+                                <td style="font-family:'JetBrains Mono'; font-weight:700;">${pt.dmy}</td>
+                                <td style="text-align:center; color:var(--status-finish); font-weight:700;">${pt.daily > 0 ? '+' + pt.daily + ' tasks' : '-'}</td>
                                 <td style="text-align:center; font-family:'JetBrains Mono';">${pt.cumActual !== null ? pt.cumActual + ' / ' + totalTasks : '-'}</td>
                                 <td style="text-align:center; font-family:'JetBrains Mono'; font-weight:800; color:var(--primary);">${pt.actualPct !== null ? pt.actualPct + '%' : '-'}</td>
                                 <td style="text-align:center; font-family:'JetBrains Mono'; color:var(--text-muted);">${pt.targetPct}%</td>
@@ -7200,11 +7340,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             ${kpiCardsHTML}
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                 <div style="font-size:0.8rem; color:var(--text-muted);">
-                    Kurva-S Real-Time Outage Unit ${currentUnit} (${startYMD} s/d ${endYMD})
+                    Real-Time S-Curve Outage Unit ${currentUnit} (${startYMD} to ${endYMD})
                 </div>
                 <div style="display:flex; gap:14px; font-size:0.75rem;">
-                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:3.5px; background:var(--primary); display:inline-block; border-radius:2px;"></span> Progres Aktual</span>
-                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:2px; background:#94a3b8; border-top:2px dashed #94a3b8; display:inline-block;"></span> Target Rencana S-Curve</span>
+                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:3.5px; background:var(--primary); display:inline-block; border-radius:2px;"></span> Actual Progress</span>
+                    <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:2px; background:#94a3b8; border-top:2px dashed #94a3b8; display:inline-block;"></span> S-Curve Planned Target</span>
                 </div>
             </div>
             ${svgHTML}
@@ -7236,7 +7376,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const collectF = (list, codeF, descF) => {
                 (list || []).forEach(item => {
                     if(item.temuan) {
-                        openFindings.push(`▪ [${item[codeF]}] ${item[descF] || ''}: ${item.temuan} (TL: ${item.tindak_lanjut || 'Proses verifikasi'})`);
+                        openFindings.push(`▪ [${item[codeF]}] ${item[descF] || ''}: ${item.temuan} (Action: ${item.tindak_lanjut || 'Under verification'})`);
                     }
                 });
             };
@@ -7246,36 +7386,36 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             collectF(fullData.temperature_tx, 'kks', 'equipment');
             collectF(fullData.pressure_switch, 'kks', 'equipment');
 
-            let msg = `*⚡ LAPORAN PROGRESS OUTAGE EIC - UNIT ${currentUnit}*\n`;
-            msg += `🏭 *PLTU MSW &bull; SECTION EIC*\n`;
-            msg += `📅 *Tanggal:* ${todayStr}\n\n`;
+            let msg = `*EIC OUTAGE PROGRESS REPORT — UNIT ${currentUnit}*\n`;
+            msg += `*PLTU MSW — SECTION ELECTRIC, INSTRUMENT & CONTROL*\n`;
+            msg += `*Date:* ${todayStr}\n\n`;
 
-            msg += `📊 *RINGKASAN PROGRESS:*\n`;
-            msg += `▪ *Grand Progress:* *${s.grand_pct}%* (${s.grand_done}/${s.grand_total} Sub-task Selesai)\n`;
-            msg += `▪ *Work Orders:* ${s.wo.pct}% (${s.wo.finish}/${s.wo.total} WO Finish &bull; ${s.wo.subtask_done}/${s.wo.subtask_total} Sub-task)\n`;
+            msg += `*PROGRESS SUMMARY:*\n`;
+            msg += `▪ *Overall Progress:* *${s.grand_pct}%* (${s.grand_done}/${s.grand_total} Sub-tasks Completed)\n`;
+            msg += `▪ *Work Orders:* ${s.wo.pct}% (${s.wo.finish}/${s.wo.total} WO Finish &bull; ${s.wo.subtask_done}/${s.wo.subtask_total} Sub-tasks)\n`;
             msg += `▪ *Actuator Valves:* ${s.actuator.pct}% (${s.actuator.finish}/${s.actuator.total} Valve Finish)\n`;
-            msg += `▪ *Instruments:* ${s.instrument.pct}% (${s.instrument.done}/${s.instrument.total} Verifikasi OK)\n\n`;
+            msg += `▪ *Instruments:* ${s.instrument.pct}% (${s.instrument.done}/${s.instrument.total} Verification OK)\n\n`;
 
-            msg += `✅ *UPDATE PEKERJAAN TERKINI:* (${todayTasks.length} Task)\n`;
+            msg += `*COMPLETED WORK UPDATES:* (${todayTasks.length} Tasks)\n`;
             if(todayTasks.length > 0) {
                 todayTasks.slice(0, 10).forEach((t, i) => {
                     msg += `${i+1}. ${t}\n`;
                 });
-                if(todayTasks.length > 10) msg += `... dan ${todayTasks.length - 10} item lainnya.\n`;
+                if(todayTasks.length > 10) msg += `... and ${todayTasks.length - 10} other items.\n`;
             } else {
-                msg += `_Belum ada task yang diselesaikan pada tanggal ${todayStr}_\n`;
+                msg += `_No tasks completed on ${todayStr}_\n`;
             }
             msg += `\n`;
 
-            msg += `⚠️ *REKAP TEMUAN / ACTIVE FINDINGS:* (${openFindings.length} Temuan)\n`;
+            msg += `*ACTIVE FINDINGS & RECOMMENDATIONS:* (${openFindings.length} Findings)\n`;
             if(openFindings.length > 0) {
                 openFindings.forEach(f => {
                     msg += `${f}\n`;
                 });
             } else {
-                msg += `_Nihil (Kondisi peralatan normal tanpa temuan terbuka)_\n`;
+                msg += `_Nil (Equipment in normal condition with no open findings)_\n`;
             }
-            msg += `\n_Laporan diperbarui otomatis dari EIC Monitoring System PLTU MSW_`;
+            msg += `\n_Report generated automatically from MSW PLTU EIC Monitoring System_`;
 
             const waBox = document.getElementById('wa-text-box');
             if(waBox) waBox.value = msg;
@@ -7291,11 +7431,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     waBox.select();
                     document.execCommand('copy');
                 }
-                showToast('✓ Format laporan WhatsApp berhasil disalin ke clipboard!', 'success', 2500);
+                showToast('✓ WhatsApp report format copied to clipboard!', 'success', 2500);
             } catch(e) {
                 waBox.select();
                 document.execCommand('copy');
-                showToast('✓ Format laporan disalin!', 'success');
+                showToast('✓ Report format copied!', 'success');
             }
         }
 
@@ -7315,11 +7455,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             localStorage.setItem('eic_theme', theme);
             const icon = document.getElementById('theme-icon');
             if(icon) {
-                icon.innerText = (theme === 'light') ? '☀️' : '🌙';
+                icon.innerHTML = (theme === 'light') ? Icons.sun : Icons.moon;
             }
             const btn = document.getElementById('theme-toggle-btn');
             if(btn) {
-                btn.title = (theme === 'light') ? 'Ganti ke Dark Mode' : 'Ganti ke Light Mode';
+                btn.title = (theme === 'light') ? 'Switch to Dark Mode' : 'Switch to Light Mode';
             }
         }
 
@@ -7363,8 +7503,8 @@ def run_server():
 
     print(f"==================================================================")
     print(f" OUTAGE EIC WORK ORDER MONITORING SYSTEM SERVER IS RUNNING!")
-    print(f" 🔹 Akses dari PC ini (Lokal)     : http://localhost:{PORT}")
-    print(f" 🔹 Akses dari PC lain (LAN/Wi-Fi): http://{local_ip}:{PORT}")
+    print(f" * Akses dari PC ini (Lokal)     : http://localhost:{PORT}")
+    print(f" * Akses dari PC lain (LAN/Wi-Fi): http://{local_ip}:{PORT}")
     print(f" Shared Directory                 : {BASE_DIR}")
     print(f"==================================================================")
     try:
