@@ -3362,11 +3362,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             <div id="edit-details-fields" class="form-grid" style="margin-top:16px;"></div>
 
-            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px; border-top:1px solid var(--border-color); padding-top:14px;">
-                <button class="page-btn" onclick="closeEditDetailsModal()">Cancel</button>
-                <button class="btn-save" onclick="saveEditDetails()" style="display:inline-flex; align-items:center; gap:6px;">
-                    <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Details
-                </button>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:18px; border-top:1px solid var(--border-color); padding-top:14px;">
+                <div>
+                    <button type="button" class="btn-danger" id="modal-btn-delete-item" onclick="handleDeleteFromEditModal()" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> <span id="modal-delete-label">Delete</span>
+                    </button>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button type="button" class="page-btn" onclick="closeEditDetailsModal()">Cancel</button>
+                    <button type="button" class="btn-save" onclick="saveEditDetails()" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Details
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -4128,12 +4135,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <div class="item-name">${item.job_description}</div>
                             </div>
                             <div class="header-actions">
-                                <button class="btn-edit-details" onclick="event.stopPropagation(); openEditDetailsModal('wo', '${item.no_wo}', {no_wo:'${item.no_wo}', job_description:'${(item.job_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}'})">
-                                    ${Icons.edit} Edit
-                                </button>
-                                <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('wo', '${item.no_wo}', '${item.no_wo} - ${item.job_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
-                                    ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
-                                </button>
                                 <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">${item.pic || '-'}</span>
                                 <span class="wo-subtask-progress" style="font-size:0.82rem; font-weight:700; color:var(--text-muted);">${doneCount} / ${totalCount} Sub-tasks</span>
                                 <span class="status-badge badge-${st}">${item.status}</span>
@@ -4246,9 +4247,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
 
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px;">
-                                <div>
-                                    <button class="btn-danger" onclick="deleteWO('${item.no_wo}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.trash} Delete WO</button>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px; flex-wrap:wrap; gap:10px;">
+                                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                    <button type="button" class="btn-edit-details" onclick="openEditDetailsModal('wo', '${item.no_wo}', {no_wo:'${item.no_wo}', job_description:'${(item.job_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}'})">
+                                        ${Icons.edit} Edit Details
+                                    </button>
+                                    <button type="button" class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('wo', '${item.no_wo}', '${item.no_wo} - ${item.job_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
+                                        ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
+                                    </button>
                                 </div>
                                 <div style="display:flex; gap:10px;">
                                     <button class="btn-save" onclick="saveWorkOrder('${item.no_wo}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Changes</button>
@@ -4396,12 +4402,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <div class="item-name">${item.equipment_description}</div>
                             </div>
                             <div class="header-actions">
-                                <button class="btn-edit-details" onclick="event.stopPropagation(); openEditDetailsModal('actuator', '${item.equipment_id}', {equipment_id:'${(item.equipment_id||'').replace(/'/g, "\\'")}', equipment_description:'${(item.equipment_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}'})">
-                                    ${Icons.edit} Edit
-                                </button>
-                                <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('actuator', '${item.equipment_id}', '${item.equipment_id} - ${item.equipment_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
-                                    ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
-                                </button>
                                 <span style="font-size:0.82rem; color:var(--text-muted); font-weight:600;">${item.pic || '-'}</span>
                                 <span class="status-badge badge-${st}">${item.status}</span>
                                 <div class="progress-box">
@@ -4446,9 +4446,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
 
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px;">
-                                <div>
-                                    <button class="btn-danger" onclick="deleteActuator('${item.equipment_id}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.trash} Delete Actuator</button>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px; flex-wrap:wrap; gap:10px;">
+                                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                    <button type="button" class="btn-edit-details" onclick="openEditDetailsModal('actuator', '${item.equipment_id}', {equipment_id:'${(item.equipment_id||'').replace(/'/g, "\\'")}', equipment_description:'${(item.equipment_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}'})">
+                                        ${Icons.edit} Edit Details
+                                    </button>
+                                    <button type="button" class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('actuator', '${item.equipment_id}', '${item.equipment_id} - ${item.equipment_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
+                                        ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
+                                    </button>
                                 </div>
                                 <div style="display:flex; gap:10px;">
                                     <button class="btn-save" onclick="saveActuator('${item.equipment_id}', '${item.equipment_description}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Actuator</button>
@@ -4708,12 +4713,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
                             <div class="header-actions">
-                                <button class="btn-edit-details" onclick="event.stopPropagation(); openEditDetailsModal('instrument', '${item.kks || item.no}', {equipment:'${(title||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', no:'${item.no||''}', description:'${(item.description||'').replace(/'/g, "\\'")}', range:'${(item.range||'').replace(/'/g, "\\'")}', sub_area:'${(item.sub_area||'').replace(/'/g, "\\'")}', set_point:'${(sp?sp.value:'').replace(/'/g, "\\'")}', sp_dir:'${sp?sp.dir:'HIGH'}', contact_type:'${(contact||'NO')}'}, '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
-                                    ${Icons.edit} Edit
-                                </button>
-                                <button class="btn-finding ${hasFindings?'active':''}" onclick="event.stopPropagation(); openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
-                                    ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
-                                </button>
                                 <span class="status-badge ${isVerif ? 'badge-FINISH' : (isCalib ? 'badge-IN-PROGRESS' : 'badge-SCHED-OK')}" id="badge-${cardPrefix}-${idx}">${isVerif ? 'DONE (100%)' : (isCalib ? 'IN PROGRESS (Calibration OK)' : 'SCHEDULED')}</span>
                             </div>
                         </div>
@@ -4778,9 +4777,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
 
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px;">
-                                <div>
-                                    <button class="btn-danger" onclick="deleteInstrument('${instSubtab}', '${item.kks || item.no}')" style="display:inline-flex; align-items:center; gap:6px;">${Icons.trash} Delete Instrument</button>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px; flex-wrap:wrap; gap:10px;">
+                                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                    <button type="button" class="btn-edit-details" onclick="openEditDetailsModal('instrument', '${item.kks || item.no}', {equipment:'${(title||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', no:'${item.no||''}', description:'${(item.description||'').replace(/'/g, "\\'")}', range:'${(item.range||'').replace(/'/g, "\\'")}', sub_area:'${(item.sub_area||'').replace(/'/g, "\\'")}', set_point:'${(sp?sp.value:'').replace(/'/g, "\\'")}', sp_dir:'${sp?sp.dir:'HIGH'}', contact_type:'${(contact||'NO')}'}, '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
+                                        ${Icons.edit} Edit Details
+                                    </button>
+                                    <button type="button" class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
+                                        ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
+                                    </button>
                                 </div>
                                 <div style="display:flex; gap:10px;">
                                     <button class="btn-save" onclick="${instSubtab==='psw' ? 'savePressureSwitch' : 'saveTransmitter'}('${instSubtab}', '${item.kks || item.no}', ${idx})" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Calibration & Verification</button>
@@ -5229,12 +5233,31 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 `;
             }
             fieldsEl.innerHTML = fieldsHtml;
+            const delLabel = document.getElementById('modal-delete-label');
+            if (delLabel) {
+                if (itemType === 'wo') delLabel.innerText = 'Delete WO';
+                else if (itemType === 'actuator') delLabel.innerText = 'Delete Actuator';
+                else if (itemType === 'instrument') delLabel.innerText = 'Delete Instrument';
+            }
             document.getElementById('edit-details-modal').classList.add('open');
         }
 
         function closeEditDetailsModal() {
             document.getElementById('edit-details-modal').classList.remove('open');
             activeEditDetails = null;
+        }
+
+        function handleDeleteFromEditModal() {
+            if (!activeEditDetails) return;
+            const { itemType, identifier, instType } = activeEditDetails;
+            closeEditDetailsModal();
+            if (itemType === 'wo') {
+                deleteWO(identifier);
+            } else if (itemType === 'actuator') {
+                deleteActuator(identifier);
+            } else if (itemType === 'instrument') {
+                deleteInstrument(instType || 'pressure_tx', identifier);
+            }
         }
 
         async function saveEditDetails() {
