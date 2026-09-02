@@ -54,6 +54,83 @@ def clean_val(val):
             return int(val)
     return str(val).strip() if isinstance(val, str) else val
 
+def parse_outage_date_val(val):
+    if not val:
+        return ""
+    if isinstance(val, (datetime.datetime, datetime.date)):
+        return val.strftime("%Y-%m-%d")
+    s = str(val).strip()
+    m_ymd = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", s)
+    if m_ymd:
+        y, m, d = m_ymd.groups()
+        return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    m_dmy = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})", s)
+    if m_dmy:
+        d, m, y = m_dmy.groups()
+        return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    return s
+
+def get_outage_dates_from_workbook(wb, unit):
+    default_start = "2026-08-22" if unit == 1 else "2026-07-21"
+    default_finish = "2026-09-05" if unit == 1 else "2026-08-31"
+    outage_start = ""
+    outage_finish = ""
+
+    if "Dashboard_Summary" in wb.sheetnames:
+        ws = wb["Dashboard_Summary"]
+        for r in range(1, ws.max_row + 1):
+            for c in range(1, min(ws.max_column + 1, 6)):
+                val = str(ws.cell(r, c).value or "").strip().lower()
+                if "outage start" in val or val == "start date":
+                    d_val = ws.cell(r, c + 1).value
+                    outage_start = parse_outage_date_val(d_val)
+                elif "outage finish" in val or "outage end" in val or val == "finish date":
+                    d_val = ws.cell(r, c + 1).value
+                    outage_finish = parse_outage_date_val(d_val)
+
+        if not outage_start and ws.cell(33, 3).value:
+            outage_start = parse_outage_date_val(ws.cell(33, 3).value)
+        if not outage_finish and ws.cell(34, 3).value:
+            outage_finish = parse_outage_date_val(ws.cell(34, 3).value)
+
+    if not outage_start:
+        outage_start = default_start
+    if not outage_finish:
+        outage_finish = default_finish
+
+    return outage_start, outage_finish
+
+def save_outage_dates_to_workbook(wb, unit, start_date, finish_date):
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    if "Dashboard_Summary" not in wb.sheetnames:
+        return
+    ws = wb["Dashboard_Summary"]
+
+    start_pos = None
+    finish_pos = None
+
+    for r in range(1, ws.max_row + 1):
+        for c in range(1, min(ws.max_column + 1, 5)):
+            val = str(ws.cell(r, c).value or "").strip().lower()
+            if "outage start" in val or val == "start date":
+                start_pos = (r, c + 1)
+            elif "outage finish" in val or "outage end" in val or val == "finish date":
+                finish_pos = (r, c + 1)
+
+    if start_pos:
+        c = ws.cell(row=start_pos[0], column=start_pos[1], value=start_date)
+        c.number_format = 'YYYY-MM-DD'
+    else:
+        c = ws.cell(row=33, column=3, value=start_date)
+        c.number_format = 'YYYY-MM-DD'
+
+    if finish_pos:
+        c = ws.cell(row=finish_pos[0], column=finish_pos[1], value=finish_date)
+        c.number_format = 'YYYY-MM-DD'
+    else:
+        c = ws.cell(row=34, column=3, value=finish_date)
+        c.number_format = 'YYYY-MM-DD'
+
 PIC_MAP = {
     "m toher": "M TOHER",
     "m. toher": "M TOHER",
@@ -959,6 +1036,7 @@ def load_unit_data(unit):
     
     with FILE_LOCK:
         wb = openpyxl.load_workbook(path, data_only=True)
+        outage_start, outage_finish = get_outage_dates_from_workbook(wb, unit)
         
         # 1. WorkOrder & Checklist
         wo_map = {}
@@ -1231,6 +1309,8 @@ def load_unit_data(unit):
         return {
             "unit": unit,
             "summary": summary,
+            "outage_start_date": outage_start,
+            "outage_finish_date": outage_finish,
             "work_orders": wo_list,
             "actuators": act_list,
             "pressure_tx": ptx_list,
@@ -1280,6 +1360,27 @@ def load_actuator_matrix():
             }
         })
     return matrix
+
+def save_outage_dates_update(data):
+    unit = int(data.get("unit", 1))
+    start_date = parse_outage_date_val(data.get("start_date", ""))
+    finish_date = parse_outage_date_val(data.get("finish_date", ""))
+    path = get_excel_path(unit)
+
+    with FILE_LOCK:
+        wb = openpyxl.load_workbook(path)
+        save_outage_dates_to_workbook(wb, unit, start_date, finish_date)
+        ok, err = safe_save_workbook(wb, path)
+        if not ok:
+            return {"status": "error", "message": err}
+
+    return {
+        "status": "success",
+        "message": f"Outage dates for Unit {unit} saved to Excel successfully.",
+        "unit": unit,
+        "start_date": start_date,
+        "finish_date": finish_date
+    }
 
 def save_wo_update(data):
     unit = data.get("unit", 1)
@@ -1773,6 +1874,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             body = {}
 
         routes = {
+            "/api/update_outage_dates": save_outage_dates_update,
             "/api/update_wo": save_wo_update,
             "/api/quick_toggle_subtask": save_quick_subtask_toggle,
             "/api/batch_toggle_subtasks": save_batch_subtask_toggle,
@@ -3460,11 +3562,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <!-- Outage Schedule Range Control Bar -->
             <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; background:var(--bg-sub); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:12px; flex-shrink:0;">
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <span style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Outage Period:</span>
-                    <input type="date" id="scurve-start-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Start Date">
+                    <span style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Outage Period (Excel):</span>
+                    <input type="date" id="scurve-start-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Start Date (Saved directly to Excel)">
                     <span style="font-size:0.8rem; color:var(--text-muted);">to</span>
-                    <input type="date" id="scurve-end-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Target Date">
-                    <button class="page-btn" style="padding:4px 12px; font-size:0.8rem; font-weight:700;" onclick="renderSCurveChart()">Calculate S-Curve</button>
+                    <input type="date" id="scurve-end-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Target Date (Saved directly to Excel)">
+                    <button class="page-btn" style="padding:4px 12px; font-size:0.8rem; font-weight:700; color:var(--primary); border-color:var(--primary);" onclick="saveAndRenderSCurve()">Save to Excel & Recalculate</button>
+                    <span style="font-size:0.75rem; color:#10b981; display:inline-flex; align-items:center; gap:4px; font-weight:600;" title="Outage dates synchronize directly with Excel Dashboard_Summary">
+                        <svg class="ui-icon xs" style="width:12px; height:12px;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        Excel Synced
+                    </span>
                 </div>
                 <div id="scurve-kpi-badge" style="display:flex; align-items:center; gap:6px; font-size:0.8rem; font-weight:700;"></div>
             </div>
@@ -3574,7 +3680,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 </div>
                 <div>
                     <div class="outage-title" id="outage-unit-title">Outage EIC Monitoring Progress Unit 1</div>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Seamlessly synchronized with Excel Templates & Findings Media</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;">
+                        <span>Seamlessly synchronized with Excel Templates</span>
+                        <span style="opacity:0.5;">&bull;</span>
+                        <span id="banner-outage-period-badge" onclick="openSCurveModal()" title="Click to view or edit S-Curve Outage Period" style="cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-weight:700; color:var(--primary); background:rgba(99,102,241,0.12); padding:1px 8px; border-radius:12px; border:1px solid rgba(99,102,241,0.25);">
+                            <svg class="ui-icon xs" style="width:12px; height:12px;" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                            <span id="banner-outage-dates-text">Outage: Loading...</span>
+                        </span>
+                    </div>
                 </div>
             </div>
             <div class="outage-progress-box">
@@ -3828,6 +3941,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 }
                 const titleEl = document.getElementById('outage-unit-title');
                 if(titleEl) titleEl.innerText = `Outage EIC Monitoring Progress Unit ${currentUnit}`;
+
+                updateBannerOutagePeriod(fullData.outage_start_date, fullData.outage_finish_date);
                 
                 renderStats();
                 populateFilterDropdowns();
@@ -5524,17 +5639,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 }
             });
 
-            let savedStart = localStorage.getItem(`eic_scurve_start_u${currentUnit}`);
-            let savedEnd = localStorage.getItem(`eic_scurve_end_u${currentUnit}`);
+            let savedStart = (fullData && fullData.outage_start_date) || localStorage.getItem(`eic_scurve_start_u${currentUnit}`);
+            let savedEnd = (fullData && fullData.outage_finish_date) || localStorage.getItem(`eic_scurve_end_u${currentUnit}`);
 
-            const activeYMDs = Object.keys(dateMap).sort();
-            if(!savedStart) savedStart = activeYMDs.length > 0 ? activeYMDs[0] : '2026-08-20';
-            if(!savedEnd) {
-                const latestActive = activeYMDs.length > 0 ? activeYMDs[activeYMDs.length - 1] : '2026-08-30';
-                const d = new Date(latestActive);
-                d.setDate(d.getDate() + 5);
-                savedEnd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            }
+            if(!savedStart) savedStart = currentUnit === 1 ? '2026-08-22' : '2026-07-21';
+            if(!savedEnd) savedEnd = currentUnit === 1 ? '2026-09-05' : '2026-08-31';
 
             const startDateObj = new Date(savedStart);
             const endDateObj = new Date(savedEnd);
@@ -7235,46 +7344,37 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             return null;
         }
 
+        function formatOutageDateHuman(ymd) {
+            if(!ymd) return '';
+            const parts = ymd.split('-');
+            if(parts.length !== 3) return ymd;
+            const d = parseInt(parts[2], 10);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const m = months[parseInt(parts[1], 10) - 1] || parts[1];
+            const y = parts[0];
+            return `${d} ${m} ${y}`;
+        }
+
+        function updateBannerOutagePeriod(startVal, endVal) {
+            const el = document.getElementById('banner-outage-dates-text');
+            if(!el) return;
+            if(startVal && endVal) {
+                el.innerText = `${formatOutageDateHuman(startVal)} - ${formatOutageDateHuman(endVal)}`;
+            } else {
+                el.innerText = `Outage Unit ${currentUnit}`;
+            }
+        }
+
         function openSCurveModal() {
             const unitLabel = document.getElementById('scurve-unit-label');
             if(unitLabel) unitLabel.innerText = currentUnit;
 
-            // Load saved outage start and end dates from localStorage
-            let savedStart = localStorage.getItem(`eic_scurve_start_u${currentUnit}`);
-            let savedEnd = localStorage.getItem(`eic_scurve_end_u${currentUnit}`);
+            // Load official outage start and end dates from Excel (or cached fallback)
+            let savedStart = (fullData && fullData.outage_start_date) || localStorage.getItem(`eic_scurve_start_u${currentUnit}`);
+            let savedEnd = (fullData && fullData.outage_finish_date) || localStorage.getItem(`eic_scurve_end_u${currentUnit}`);
 
-            // If not found in localStorage, discover from data
-            if(!savedStart || !savedEnd) {
-                let allTimes = [];
-                const checkItem = (dStr) => {
-                    const parsed = extractValidDate(dStr);
-                    if(parsed) allTimes.push(parsed.time);
-                };
-                (fullData.work_orders || []).forEach(w => {
-                    (w.checklist || []).forEach(c => { if(c.tanggal) checkItem(c.tanggal); });
-                    if(w.tanggal_finish) checkItem(w.tanggal_finish);
-                });
-                (fullData.actuators || []).forEach(a => { if(a.finish_date) checkItem(a.finish_date); });
-                (fullData.pressure_tx || []).forEach(i => { if(i.tanggal || i.finish_date) checkItem(i.tanggal || i.finish_date); });
-                (fullData.temperature_tx || []).forEach(i => { if(i.tanggal || i.finish_date) checkItem(i.tanggal || i.finish_date); });
-                (fullData.pressure_switch || []).forEach(i => { if(i.dated || i.finish_date) checkItem(i.dated || i.finish_date); });
-
-                let minTime = allTimes.length > 0 ? Math.min(...allTimes) : new Date().getTime();
-                let maxTime = allTimes.length > 0 ? Math.max(...allTimes) : new Date().getTime();
-
-                const toYMD = (t) => {
-                    const d = new Date(t);
-                    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                };
-
-                if(!savedStart) {
-                    savedStart = toYMD(minTime);
-                }
-                if(!savedEnd) {
-                    let endT = Math.max(minTime + 14 * 86400000, maxTime + 4 * 86400000);
-                    savedEnd = toYMD(endT);
-                }
-            }
+            if(!savedStart) savedStart = currentUnit === 1 ? '2026-08-22' : '2026-07-21';
+            if(!savedEnd) savedEnd = currentUnit === 1 ? '2026-09-05' : '2026-08-31';
 
             const startInp = document.getElementById('scurve-start-date');
             const endInp = document.getElementById('scurve-end-date');
@@ -7289,12 +7389,44 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             document.getElementById('scurve-modal').classList.remove('open');
         }
 
-        function saveAndRenderSCurve() {
+        async function saveAndRenderSCurve() {
             const startVal = document.getElementById('scurve-start-date').value;
             const endVal = document.getElementById('scurve-end-date').value;
-            if(startVal) localStorage.setItem(`eic_scurve_start_u${currentUnit}`, startVal);
-            if(endVal) localStorage.setItem(`eic_scurve_end_u${currentUnit}`, endVal);
+            if(!startVal || !endVal) return;
+
+            // Save locally
+            localStorage.setItem(`eic_scurve_start_u${currentUnit}`, startVal);
+            localStorage.setItem(`eic_scurve_end_u${currentUnit}`, endVal);
+
+            if(fullData) {
+                fullData.outage_start_date = startVal;
+                fullData.outage_finish_date = endVal;
+            }
+
+            updateBannerOutagePeriod(startVal, endVal);
             renderSCurveChart();
+
+            // Persist directly to master Excel workbook
+            try {
+                const res = await fetch('/api/update_outage_dates', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        unit: currentUnit,
+                        start_date: startVal,
+                        finish_date: endVal
+                    })
+                });
+                const result = await res.json();
+                if(result.status === 'success') {
+                    showToast('✓ Outage dates saved to Excel successfully!', 'success', 2000);
+                } else {
+                    showToast(result.message || 'Failed to save dates to Excel', 'error');
+                }
+            } catch(e) {
+                console.error("Failed to save outage dates:", e);
+                showToast('Failed to save outage dates to server', 'error');
+            }
         }
 
         function openWaSummaryModal() {
@@ -7405,15 +7537,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             let startYMD = startInput ? startInput.value : '';
             let endYMD = endInput ? endInput.value : '';
 
-            // Fallback if empty
-            const activeYMDs = Object.keys(dateMap).sort();
-            if(!startYMD) startYMD = activeYMDs.length > 0 ? activeYMDs[0] : '2026-08-20';
-            if(!endYMD) {
-                const latestActive = activeYMDs.length > 0 ? activeYMDs[activeYMDs.length - 1] : '2026-08-30';
-                const d = new Date(latestActive);
-                d.setDate(d.getDate() + 5);
-                endYMD = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            }
+            // Fallback if empty (use official Excel outage dates)
+            if(!startYMD) startYMD = (fullData && fullData.outage_start_date) || (currentUnit === 1 ? '2026-08-22' : '2026-07-21');
+            if(!endYMD) endYMD = (fullData && fullData.outage_finish_date) || (currentUnit === 1 ? '2026-09-05' : '2026-08-31');
 
             const startDateObj = new Date(startYMD);
             const endDateObj = new Date(endYMD);

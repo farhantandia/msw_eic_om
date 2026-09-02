@@ -136,7 +136,7 @@ Each master workbook contains **8 standardized sheets**:
 | **`Instrument_TemperatureTX`** | Temperature transmitter calibrations | `No`, `Area`, `Equipment`, `KKS`, `Unit`, `Range`, `Date`, `Finish_Date`, `Done_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
 | **`Instrument_PressureSwitch`** | Pressure switch set point testing | `No`, `Area`, `Description`, `KKS`, `Unit`, `Sub_Area`, `Set_Point`, `Contact_Type_NO_NC`, `AsFound_Set`, `AsFound_Reset`, `AsLeft_Set`, `AsLeft_Reset`, `Status_OK_NotOK`, `Done_TRUE_FALSE`, `Date`, `Finish_Date`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
 | **`PIC_Scope_Master`** | Job scope & PIC mapping | `Category`, `Equipment_Scope_Name`, `Scope_Type_Vendor_MSW`, `Work_Scope_ME_SI_SE`, `Activity_Description`, `PIC`, `Unit` |
-| **`Dashboard_Summary`** | Automated formula calculations | Formula-based summary (`COUNTIFS`) computing progress percentages |
+| **`Dashboard_Summary`** | Automated formula calculations & Outage Schedule | Formula-based summary (`COUNTIFS`) computing progress percentages & Section 5 storing official Outage Start Date and Outage Finish Date |
 
 ---
 
@@ -178,7 +178,8 @@ Each master workbook contains **8 standardized sheets**:
 ### 6.6. S-Curve Trajectory & Progress Analytics
 - **FR-6.1 Mathematical S-Curve Model:** Calculates planned target trajectory using a normalized sigmoid function ($k=7.0$).
 - **FR-6.2 Variance Analytics:** Displays real-time progress variance (`+X% Ahead` or `-X% Behind`).
-- **FR-6.3 Configurable Outage Window:** Dynamic date-picker controls stored in `localStorage` for customized outage schedules.
+- **FR-6.3 Two-Way Excel Outage Window Persistence:** Official Outage Start Date and Outage Finish Date stored directly in `Dashboard_Summary` Section 5 of both master Excel workbooks. Date edits in the web UI commit directly to Excel via `/api/update_outage_dates`, keeping the planned S-Curve trajectory stable and consistent across all devices and client sessions.
+- **FR-6.4 Outage Banner Period Badge:** Interactive badge displayed in the Outage Banner showing active date window with 1-click modal access.
 
 ### 6.7. WhatsApp Coordination Briefing Generator
 - **FR-7.1 Structured Message Formatter:** Automatically compiles Grand Progress, Work Orders, Actuators, Instruments, tasks completed today, and open defect findings.
@@ -218,6 +219,12 @@ The interface adheres to modern enterprise SaaS standards:
 ---
 
 ## 9. Complete Changelog & Evolution History
+
+### 🔹 Version 2.1 (September 2, 2026) — *Excel Outage Schedule Persistence & Stable S-Curve*
+- **Two-Way Excel Outage Schedule Synchronization:** Added Section 5 (`OUTAGE SCHEDULE & S-CURVE PERIOD`) in `Dashboard_Summary` sheet across Unit 1 and Unit 2 master workbooks storing official Outage Start Date and Outage Finish Date.
+- **API Endpoint `/api/update_outage_dates`:** Thread-safe backend endpoint allowing users to modify outage dates from the web UI and immediately write changes into the Excel file.
+- **Outage Banner Period Badge:** Added interactive Outage Period badge in the dashboard banner with 1-click shortcut to open and adjust S-Curve dates.
+- **Eliminated S-Curve Date Drift:** Resolved volatile date shifting caused by dynamic task date discovery by anchoring calculations to official Excel outage dates.
 
 ### 🔹 Version 2.0 (September 1, 2026) — *Enterprise Iconography & Full Localization*
 - **Vector SVG Icon System:** Replaced 50+ OS emoji characters with crisp, stroke-based inline SVG icons (Lucide style) across all headers, tabs, cards, tables, buttons, and modals.
