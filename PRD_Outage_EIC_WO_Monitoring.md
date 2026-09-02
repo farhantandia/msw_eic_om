@@ -4,9 +4,9 @@
 
 | Document Metric | Specification |
 | :--- | :--- |
-| **Document Version** | **2.0 (Enterprise Production Release)** |
+| **Document Version** | **2.2 (Annual Outage Rollover & Campaign Setup Release)** |
 | **Author / Lead** | M. Farhan Tandia (EIC & IT Supervisor) & EIC Team PLTU MSW |
-| **Last Updated** | **September 1, 2026** |
+| **Last Updated** | **September 2, 2026** |
 | **Status** | **Approved & Active in Production** |
 | **Runtime Target** | Standalone Windows Executable (`server.exe`) & Python 3.8+ (Localhost / LAN) |
 
@@ -188,8 +188,15 @@ Each master workbook contains **8 standardized sheets**:
 ### 6.8. Field Evidence & Photo Management
 - **FR-8.1 Defect & Action Logging:** Dual textarea inputs for abnormal findings and recommended corrective action plans.
 - **FR-8.2 Multi-Photo Evidence:** Drag-and-drop file uploader and direct camera capture (`accept="image/*" capture="environment"`).
-- **FR-8.3 Storage & Sync:** Photos saved to `Finding/UNIT X/<Item ID>/` and synchronized with Excel `Photo_Count`.
+- **FR-8.3 Unit & Component-Named Storage Architecture:** Photos and field findings are cleanly separated per unit into `Finding/UNIT 1/` and `Finding/UNIT 2/`. Folder names use descriptive human-readable component names (e.g. `ACTUATOR TURBINE CONTROL`, `PRESSURE TRANSMITTER - MAIN STEAM`, `OM EIC Y1 UNIT COMMON COOLING TOWER FAN 1`) rather than raw KKS or equipment IDs, synchronized with Excel `Photo_Count`.
 - **FR-8.4 Fullscreen Lightbox:** Click-to-enlarge modal for field photo inspections.
+
+### 6.9. Annual Outage Rollover & Campaign Setup
+- **FR-9.1 Password-Gated Access Control:** Access to the Outage Rollover Wizard is strictly restricted behind Master Authorization Password validation at both frontend UI and backend API layers.
+- **FR-9.2 Work Order Mapping Engine:** Endpoint `/api/export_wo_mapping?unit=X` dynamically generates Excel templates containing current active WOs for easy assignment of new WO numbers from CMMS (SAP / Maximo).
+- **FR-9.3 Flexible Remapping Modes:** Supports both *Upload Filled Excel Mapping* and *Quick Prefix Replace* (e.g. `WO-100826-` &rarr; `WO-150827-`).
+- **FR-9.4 Cascading Data Integrity:** Remaps Work Orders and replicates new WO numbers across all 760+ checklist subtasks without broken links.
+- **FR-9.5 Automated Archiving & Zero Data Loss:** Automatically creates timestamped archives of existing workbooks and photo documentation in `Archive/` before resetting progress to 0% (`SCHED-OK` status, reset checkboxes, updated S-Curve baseline dates).
 
 ---
 
@@ -219,6 +226,14 @@ The interface adheres to modern enterprise SaaS standards:
 ---
 
 ## 9. Complete Changelog & Evolution History
+
+### 🔹 Version 2.2 (September 2, 2026) — *Annual Outage Rollover & Progress Reset Wizard*
+- **Password-Protected Outage Rollover Wizard:** Added a dedicated modal wizard accessible via the header `Rollover` button, guarded by Master EIC Password authentication.
+- **Dual Remapping Architecture:** Added support for both uploaded Excel mapping files (`WO_Mapping_Unit_X.xlsx`) and 1-click Quick Prefix replacement.
+- **Area & Job Description Remapping:** Synchronizes modifications made to `Area` and `Job_Description` in mapping files directly into master workbooks.
+- **Unit & Component-Named Finding Organization:** Restructured finding photo directories to `Finding/UNIT 1/` and `Finding/UNIT 2/`, with folders named by descriptive component names (e.g. `ACTUATOR TURBINE CONTROL`) instead of raw KKS or equipment codes.
+- **Automated Cascading WO Update & Archiving:** Automatically backs up master Excel workbooks and photos to `Archive/`, cascades new WO numbers into `WorkOrder` and `WorkOrder_Checklist`, and resets all progress, checklists, actuators, instruments, and findings to 0% (`SCHED-OK`).
+- **Endpoints `/api/export_wo_mapping` & `/api/rollover_outage`:** Thread-safe endpoints for template generation and multi-unit rollover execution.
 
 ### 🔹 Version 2.1 (September 2, 2026) — *Excel Outage Schedule Persistence & Stable S-Curve*
 - **Two-Way Excel Outage Schedule Synchronization:** Added Section 5 (`OUTAGE SCHEDULE & S-CURVE PERIOD`) in `Dashboard_Summary` sheet across Unit 1 and Unit 2 master workbooks storing official Outage Start Date and Outage Finish Date.
@@ -270,6 +285,13 @@ The interface adheres to modern enterprise SaaS standards:
 5. **Exporting Reports & WhatsApp Briefings:**
    - Click **Reports** in the header.
    - Select the desired report format, adjust date filters, and click **Print / Export PDF** or **WhatsApp Summary**.
+6. **Annual Outage Rollover (Transitioning to Next Year):**
+   - Click **Rollover** in the header controls.
+   - Enter the Master EIC Password to unlock the wizard.
+   - Select the target Unit (Unit 1, Unit 2, or Both).
+   - Download the WO Mapping Template to review or fill new WO numbers, or use Quick Prefix Replace if only date codes change.
+   - Set the New Outage Start and Finish baseline dates.
+   - Click **Eksekusi Outage Rollover & Reset Progress**. The system automatically archives existing data, updates WO numbers, resets all progress to 0%, and refreshes the live dashboard.
 
 ---
 

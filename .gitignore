@@ -1,19 +1,42 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# Git Ignore Configuration - Outage EIC Work Order Monitoring System
+# ==============================================================================
+
+# Python Bytecode & Cache
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyd
 
-# PyInstaller build artifacts (keep server.exe and server.spec)
+# PyInstaller Build & Dist Artifacts (keeps root server.exe and server.spec)
 build/
+dist/
 *.manifest
 
-# Scratch scripts
+# Backup & Archive Directories (Auto-generated outage backups & manual backups)
+Data list/
+Archive/
+Backup/
+*.bak
+*.bak_*
+*.backup
+
+# Scratch & Temporary Testing Scripts
 scratch/
 
-# Temporary system artifacts
+# Application Logs & Temporary System Artifacts
+*.log
 .tempmediaStorage/
 .system_generated/
-*.log
+*.tmp
+*.temp
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.agents/
 
 # Operating System Files
 Thumbs.db

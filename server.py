@@ -9,6 +9,7 @@ import threading
 import mimetypes
 import datetime
 import base64
+import io
 import openpyxl
 import difflib
 import re
@@ -110,11 +111,11 @@ def save_outage_dates_to_workbook(wb, unit, start_date, finish_date):
     finish_pos = None
 
     for r in range(1, ws.max_row + 1):
-        for c in range(1, min(ws.max_column + 1, 5)):
+        for c in range(1, min(ws.max_column + 1, 4)):
             val = str(ws.cell(r, c).value or "").strip().lower()
-            if "outage start" in val or val == "start date":
+            if not start_pos and ("outage start" in val or val == "start date"):
                 start_pos = (r, c + 1)
-            elif "outage finish" in val or "outage end" in val or val == "finish date":
+            elif not finish_pos and ("outage finish" in val or "outage end" in val or val == "finish date"):
                 finish_pos = (r, c + 1)
 
     if start_pos:
@@ -130,6 +131,16 @@ def save_outage_dates_to_workbook(wb, unit, start_date, finish_date):
     else:
         c = ws.cell(row=34, column=3, value=finish_date)
         c.number_format = 'YYYY-MM-DD'
+
+    # Also calculate and update Target Duration in days if row 35 exists
+    try:
+        d1 = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        d2 = datetime.datetime.strptime(finish_date, "%Y-%m-%d")
+        dur_days = (d2 - d1).days + 1
+        if dur_days > 0:
+            ws.cell(row=35, column=3, value=dur_days)
+    except Exception:
+        pass
 
 PIC_MAP = {
     "m toher": "M TOHER",
@@ -1382,6 +1393,396 @@ def save_outage_dates_update(data):
         "finish_date": finish_date
     }
 
+VALID_MASTER_PASSWORDS = ["eic123", "admin123", "msweic", "123456", "eic2026", "admin@msw"]
+
+def generate_wo_mapping_excel(unit):
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    path = get_excel_path(unit)
+    if not os.path.exists(path):
+        return None, ""
+    
+    with FILE_LOCK:
+        wb_source = openpyxl.load_workbook(path, data_only=True)
+        if "WorkOrder" not in wb_source.sheetnames:
+            return None, ""
+        ws_source_wo = wb_source["WorkOrder"]
+        
+        subtask_counts = {}
+        if "WorkOrder_Checklist" in wb_source.sheetnames:
+            ws_source_chk = wb_source["WorkOrder_Checklist"]
+            for r in list(ws_source_chk.iter_rows(values_only=True))[1:]:
+                if r[0]:
+                    s_wo = str(r[0]).strip()
+                    subtask_counts[s_wo] = subtask_counts.get(s_wo, 0) + 1
+                    
+        wo_rows = []
+        for r in list(ws_source_wo.iter_rows(values_only=True))[1:]:
+            if r[1]:
+                curr_wo = str(r[1]).strip()
+                job_desc = clean_val(r[3])
+                area = clean_val(r[4]) or "GENERAL"
+                st_cnt = subtask_counts.get(curr_wo, clean_val(r[10]) or 0)
+                wo_rows.append((curr_wo, job_desc, area, st_cnt))
+
+    wb_new = openpyxl.Workbook()
+    ws_new = wb_new.active
+    ws_new.title = f"WO_Mapping_Unit_{unit}"
+    ws_new.views.sheetView[0].showGridLines = True
+
+    font_title = Font(name="Arial", size=12, bold=True, color="1F4E78")
+    font_instruction = Font(name="Arial", size=9, italic=True, color="555555")
+    font_hdr = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+    font_data = Font(name="Arial", size=10, bold=False, color="000000")
+    font_new_wo = Font(name="Arial", size=10, bold=True, color="002060")
+
+    fill_hdr = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    fill_new_hdr = PatternFill(start_color="0070C0", end_color="0070C0", fill_type="solid")
+    fill_new_col = PatternFill(start_color="F2F8FD", end_color="F2F8FD", fill_type="solid")
+
+    thin_border = Border(
+        left=Side(style='thin', color='D3D3D3'),
+        right=Side(style='thin', color='D3D3D3'),
+        top=Side(style='thin', color='D3D3D3'),
+        bottom=Side(style='thin', color='D3D3D3')
+    )
+
+    ws_new.cell(row=1, column=1, value=f"EIC OUTAGE WORK ORDER MAPPING TEMPLATE — UNIT {unit}").font = font_title
+    ws_new.cell(row=2, column=1, value="Panduan: Isi kolom 'New_No_WO' dengan nomor WO baru dari CMMS (SAP/Maximo). Kolom lain sebagai referensi. Simpan dan unggah kembali di Web UI.").font = font_instruction
+
+    headers = [
+        ("No", 8, "center", fill_hdr),
+        ("Current_No_WO", 24, "center", fill_hdr),
+        ("Job_Description", 48, "left", fill_hdr),
+        ("Area", 18, "left", fill_hdr),
+        ("Subtask_Count", 15, "center", fill_hdr),
+        ("New_No_WO", 26, "center", fill_new_hdr),
+        ("Notes", 25, "left", fill_hdr)
+    ]
+
+    for col_idx, (h_title, width, align, fill) in enumerate(headers, 1):
+        c = ws_new.cell(row=4, column=col_idx, value=h_title)
+        c.font = font_hdr
+        c.fill = fill
+        c.alignment = Alignment(horizontal=align, vertical="center")
+        c.border = thin_border
+        col_letter = openpyxl.utils.get_column_letter(col_idx)
+        ws_new.column_dimensions[col_letter].width = width
+
+    ws_new.row_dimensions[4].height = 24
+
+    for idx, (curr_wo, job_desc, area, st_cnt) in enumerate(wo_rows, 1):
+        row_num = 4 + idx
+        ws_new.row_dimensions[row_num].height = 20
+        
+        c1 = ws_new.cell(row=row_num, column=1, value=idx)
+        c1.font = font_data
+        c1.alignment = Alignment(horizontal="center", vertical="center")
+        c1.border = thin_border
+
+        c2 = ws_new.cell(row=row_num, column=2, value=curr_wo)
+        c2.font = font_data
+        c2.alignment = Alignment(horizontal="center", vertical="center")
+        c2.border = thin_border
+
+        c3 = ws_new.cell(row=row_num, column=3, value=job_desc)
+        c3.font = font_data
+        c3.alignment = Alignment(horizontal="left", vertical="center")
+        c3.border = thin_border
+
+        c4 = ws_new.cell(row=row_num, column=4, value=area)
+        c4.font = font_data
+        c4.alignment = Alignment(horizontal="left", vertical="center")
+        c4.border = thin_border
+
+        c5 = ws_new.cell(row=row_num, column=5, value=st_cnt)
+        c5.font = font_data
+        c5.alignment = Alignment(horizontal="center", vertical="center")
+        c5.border = thin_border
+
+        c6 = ws_new.cell(row=row_num, column=6, value="")
+        c6.font = font_new_wo
+        c6.fill = fill_new_col
+        c6.alignment = Alignment(horizontal="center", vertical="center")
+        c6.border = thin_border
+
+        c7 = ws_new.cell(row=row_num, column=7, value="")
+        c7.font = font_data
+        c7.alignment = Alignment(horizontal="left", vertical="center")
+        c7.border = thin_border
+
+    out_bytes = io.BytesIO()
+    wb_new.save(out_bytes)
+    filename = f"WO_Mapping_Unit_{unit}_{datetime.date.today().strftime('%Y%m%d')}.xlsx"
+    return out_bytes.getvalue(), filename
+
+def handle_rollover_outage(data):
+    password = str(data.get("password", "")).strip()
+    if not password or password.lower() not in VALID_MASTER_PASSWORDS:
+        return {"status": "error", "message": "Master Authorization Password invalid! Access denied."}
+
+    units_input = data.get("units", [1])
+    if isinstance(units_input, int):
+        units = [units_input]
+    elif isinstance(units_input, list):
+        units = [int(u) for u in units_input if str(u) in ["1", "2"]]
+    else:
+        units = [1]
+    if not units:
+        units = [1, 2]
+
+    method = data.get("method", "prefix_replace")
+    prefix_old = str(data.get("prefix_old", "")).strip()
+    prefix_new = str(data.get("prefix_new", "")).strip()
+    mapping_b64 = data.get("mapping_file_base64", "")
+    
+    start_date = parse_outage_date_val(data.get("start_date", ""))
+    finish_date = parse_outage_date_val(data.get("finish_date", ""))
+    archive_label = str(data.get("archive_label", "Annual_Outage")).strip()
+    
+    options = data.get("options", {})
+    auto_archive = bool(options.get("auto_archive", True))
+    reset_checklists = bool(options.get("reset_checklists", True))
+    reset_actuators = bool(options.get("reset_actuators", True))
+    reset_instruments = bool(options.get("reset_instruments", True))
+    reset_findings = bool(options.get("reset_findings", True))
+
+    excel_wo_map = {}
+    if method == "excel_upload" and mapping_b64:
+        try:
+            if "," in mapping_b64:
+                mapping_b64 = mapping_b64.split(",", 1)[1]
+            raw_bytes = base64.b64decode(mapping_b64)
+            wb_map = openpyxl.load_workbook(io.BytesIO(raw_bytes), data_only=True)
+            ws_map = wb_map.active
+            
+            col_curr = None
+            col_new = None
+            col_desc = None
+            col_area = None
+            start_row = 2
+            for r in range(1, min(10, ws_map.max_row + 1)):
+                for c in range(1, min(15, ws_map.max_column + 1)):
+                    v = str(ws_map.cell(r, c).value or "").strip().lower()
+                    if ("current" in v or "old" in v) and "wo" in v:
+                        col_curr = c
+                    elif "new" in v and "wo" in v:
+                        col_new = c
+                    elif "area" in v:
+                        col_area = c
+                    elif "description" in v or "job" in v:
+                        col_desc = c
+                if col_curr and col_new:
+                    start_row = r + 1
+                    break
+            
+            if not col_curr or not col_new:
+                col_curr = 2
+                col_new = 6
+                start_row = 5
+            if not col_desc:
+                col_desc = 3
+            if not col_area:
+                col_area = 4
+
+            for r in range(start_row, ws_map.max_row + 1):
+                c_old = str(ws_map.cell(r, col_curr).value or "").strip()
+                c_new = str(ws_map.cell(r, col_new).value or "").strip()
+                c_desc = str(ws_map.cell(r, col_desc).value or "").strip() if col_desc else ""
+                c_area = str(ws_map.cell(r, col_area).value or "").strip() if col_area else ""
+                if c_old:
+                    excel_wo_map[c_old] = {
+                        "new_wo": c_new if c_new else c_old,
+                        "job_desc": c_desc if c_desc else None,
+                        "area": c_area if c_area else None
+                    }
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to parse uploaded Excel mapping file: {str(e)}"}
+
+    def get_remapped_info(old_wo):
+        if not old_wo:
+            return old_wo, None, None
+        s_old = str(old_wo).strip()
+        if method == "excel_upload":
+            info = excel_wo_map.get(s_old)
+            if info:
+                return info.get("new_wo") or s_old, info.get("area"), info.get("job_desc")
+            return s_old, None, None
+        elif method == "prefix_replace":
+            if prefix_old and prefix_new and s_old.startswith(prefix_old):
+                return prefix_new + s_old[len(prefix_old):], None, None
+        return s_old, None, None
+
+    stats = {
+        "units": units,
+        "wos_updated": 0,
+        "subtasks_remapped": 0,
+        "areas_updated": 0,
+        "descriptions_updated": 0,
+        "actuators_reset": 0,
+        "instruments_reset": 0,
+        "archive_dir": ""
+    }
+
+    timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_folder_name = f"{archive_label}_{timestamp_str}".replace(" ", "_").replace("/", "-")
+    archive_path = os.path.join(BASE_DIR, "Archive", archive_folder_name)
+
+    with FILE_LOCK:
+        if auto_archive:
+            try:
+                os.makedirs(archive_path, exist_ok=True)
+                for u in [1, 2]:
+                    p = get_excel_path(u)
+                    if os.path.exists(p):
+                        shutil.copy2(p, os.path.join(archive_path, os.path.basename(p)))
+                finding_dir = os.path.join(BASE_DIR, "Finding")
+                if os.path.exists(finding_dir):
+                    shutil.copytree(finding_dir, os.path.join(archive_path, "Finding"), dirs_exist_ok=True)
+                stats["archive_dir"] = archive_path
+            except Exception as e:
+                return {"status": "error", "message": f"Archiving failed: {str(e)}"}
+
+        for u in units:
+            path = get_excel_path(u)
+            if not os.path.exists(path):
+                continue
+            
+            wb = openpyxl.load_workbook(path)
+            
+            if "WorkOrder" in wb.sheetnames:
+                ws_wo = wb["WorkOrder"]
+                for row in ws_wo.iter_rows(min_row=2):
+                    if row[1].value:
+                        old_wo = str(row[1].value).strip()
+                        new_wo, new_area, new_desc = get_remapped_info(old_wo)
+                        if new_wo != old_wo:
+                            row[1].value = new_wo
+                            stats["wos_updated"] += 1
+                        if new_area and str(row[4].value or "").strip() != new_area:
+                            row[4].value = new_area
+                            stats["areas_updated"] += 1
+                        if new_desc and str(row[3].value or "").strip() != new_desc:
+                            row[3].value = new_desc
+                            stats["descriptions_updated"] += 1
+                        if reset_checklists:
+                            row[6].value = None
+                            row[7].value = None
+                            row[8].value = "SCHED-OK"
+                            row[11].value = 0
+                        if reset_findings:
+                            row[13].value = None
+                            row[14].value = None
+                            row[15].value = None
+                            row[16].value = 0
+            
+            if "WorkOrder_Checklist" in wb.sheetnames:
+                ws_chk = wb["WorkOrder_Checklist"]
+                for row in ws_chk.iter_rows(min_row=2):
+                    if row[0].value:
+                        old_wo = str(row[0].value).strip()
+                        new_wo, _, _ = get_remapped_info(old_wo)
+                        if new_wo != old_wo:
+                            row[0].value = new_wo
+                            stats["subtasks_remapped"] += 1
+                        if reset_checklists:
+                            row[2].value = None
+                            row[4].value = False
+                        if reset_findings:
+                            row[5].value = None
+                            row[6].value = None
+                            row[7].value = 0
+
+            if "ActuatorValve" in wb.sheetnames:
+                ws_act = wb["ActuatorValve"]
+                for row in ws_act.iter_rows(min_row=2):
+                    if row[0].value or row[2].value:
+                        if reset_actuators:
+                            row[6].value = "SCHED-OK"
+                            row[7].value = 0
+                            row[8].value = None
+                            row[9].value = False
+                            row[10].value = False
+                            stats["actuators_reset"] += 1
+                        if reset_findings:
+                            row[11].value = None
+                            row[12].value = None
+                            row[13].value = None
+                            row[14].value = 0
+
+            if "Instrument_PressureTX" in wb.sheetnames:
+                ws_ptx = wb["Instrument_PressureTX"]
+                for row in ws_ptx.iter_rows(min_row=2):
+                    if row[0].value or row[3].value:
+                        if reset_instruments:
+                            row[6].value = None
+                            row[7].value = False
+                            stats["instruments_reset"] += 1
+                        if reset_findings:
+                            row[8].value = None
+                            row[9].value = None
+                            row[10].value = None
+                            row[11].value = 0
+
+            if "Instrument_TemperatureTX" in wb.sheetnames:
+                ws_ttx = wb["Instrument_TemperatureTX"]
+                for row in ws_ttx.iter_rows(min_row=2):
+                    if row[0].value or row[3].value:
+                        if reset_instruments:
+                            row[6].value = None
+                            row[7].value = False
+                            stats["instruments_reset"] += 1
+                        if reset_findings:
+                            row[8].value = None
+                            row[9].value = None
+                            row[10].value = None
+                            row[11].value = 0
+
+            if "Instrument_PressureSwitch" in wb.sheetnames:
+                ws_psw = wb["Instrument_PressureSwitch"]
+                for row in ws_psw.iter_rows(min_row=2):
+                    if row[0].value or row[3].value:
+                        if reset_instruments:
+                            row[8].value = None
+                            row[9].value = None
+                            row[10].value = None
+                            row[11].value = None
+                            row[12].value = None
+                            row[13].value = False
+                            row[14].value = None
+                            row[15].value = None
+                            stats["instruments_reset"] += 1
+                        if reset_findings:
+                            row[16].value = None
+                            row[17].value = None
+                            row[18].value = None
+                            row[19].value = 0
+
+            if start_date and finish_date:
+                save_outage_dates_to_workbook(wb, u, start_date, finish_date)
+
+            ok, err = safe_save_workbook(wb, path)
+            if not ok:
+                return {"status": "error", "message": f"Failed to save changes to Unit {u}: {err}"}
+
+            if reset_findings:
+                u_finding_dir = os.path.join(BASE_DIR, "Finding", f"UNIT {u}")
+                if os.path.exists(u_finding_dir):
+                    try:
+                        for item in os.listdir(u_finding_dir):
+                            item_p = os.path.join(u_finding_dir, item)
+                            if os.path.isdir(item_p):
+                                shutil.rmtree(item_p, ignore_errors=True)
+                            else:
+                                os.remove(item_p)
+                    except Exception as e:
+                        print(f"Notice: Failed to clear finding photos for Unit {u}: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Outage Rollover successfully executed for Unit(s): {', '.join(map(str, units))}.",
+        "stats": stats
+    }
+
 def save_wo_update(data):
     unit = data.get("unit", 1)
     no_wo = data.get("no_wo")
@@ -1656,13 +2057,129 @@ def save_edit_details(data):
         if not ok: return {"status": "error", "message": err}
     return {"status": "success", "message": f"Item details updated successfully."}
 
-def sanitize_folder_name(name):
-    clean = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in str(name).strip())
-    return clean or "ITEM"
+def sanitize_finding_folder_name(name):
+    if not name:
+        return "UNKNOWN_COMPONENT"
+    s = str(name).replace('\xa0', ' ').strip()
+    s = re.sub(r'[\\/:*?"<>|]', '_', s)
+    s = re.sub(r'\s+', ' ', s).strip().upper()
+    return s or "UNKNOWN_COMPONENT"
 
-def handle_get_finding_data(eq_id):
-    folder_name = sanitize_folder_name(eq_id)
-    finding_dir = os.path.join(BASE_DIR, "Finding", folder_name)
+def resolve_finding_folder_name(unit, item_type, eq_id, component_name=None, inst_type=None):
+    if component_name and str(component_name).strip():
+        c_name = str(component_name).strip()
+        upper_c = c_name.upper()
+        if item_type == "instrument":
+            if "TRANSMITTER" not in upper_c and "SWITCH" not in upper_c:
+                if inst_type == "pressure_switch":
+                    c_name = f"PRESSURE SWITCH - {c_name}"
+                elif inst_type == "temperature_tx":
+                    c_name = f"TEMPERATURE TRANSMITTER - {c_name}"
+                else:
+                    c_name = f"PRESSURE TRANSMITTER - {c_name}"
+        return sanitize_finding_folder_name(c_name)
+
+    path = get_excel_path(unit)
+    if os.path.exists(path):
+        try:
+            wb = openpyxl.load_workbook(path, data_only=True)
+            s_id = str(eq_id).strip()
+            
+            # WorkOrder
+            if (not item_type or item_type == "wo") and "WorkOrder" in wb.sheetnames:
+                ws = wb["WorkOrder"]
+                for r in list(ws.iter_rows(values_only=True))[1:]:
+                    if r[1] and str(r[1]).strip() == s_id:
+                        if r[3]:
+                            return sanitize_finding_folder_name(r[3])
+            
+            # ActuatorValve
+            if (not item_type or item_type == "actuator") and "ActuatorValve" in wb.sheetnames:
+                ws = wb["ActuatorValve"]
+                for r in list(ws.iter_rows(values_only=True))[1:]:
+                    if (r[0] and str(r[0]).strip() == s_id) or (r[3] and str(r[3]).strip() == s_id):
+                        if r[2]:
+                            return sanitize_finding_folder_name(r[2])
+            
+            # Instruments
+            if (not item_type or item_type == "instrument"):
+                for sheet, prefix in [
+                    ("Instrument_PressureTX", "PRESSURE TRANSMITTER - "),
+                    ("Instrument_TemperatureTX", "TEMPERATURE TRANSMITTER - "),
+                    ("Instrument_PressureSwitch", "PRESSURE SWITCH - ")
+                ]:
+                    if sheet in wb.sheetnames:
+                        ws = wb[sheet]
+                        for r in list(ws.iter_rows(values_only=True))[1:]:
+                            if (len(r) > 3 and r[3] and str(r[3]).strip() == s_id) or (len(r) > 0 and str(r[0]).strip() == s_id):
+                                eq_name = r[2] if len(r) > 2 else ""
+                                if eq_name:
+                                    clean_eq = sanitize_finding_folder_name(eq_name)
+                                    if "TRANSMITTER" in clean_eq or "SWITCH" in clean_eq:
+                                        return clean_eq
+                                    return f"{prefix}{clean_eq}"
+        except Exception as e:
+            pass
+
+    return sanitize_finding_folder_name(eq_id)
+
+def migrate_existing_findings_folders():
+    finding_dir = os.path.join(BASE_DIR, "Finding")
+    if not os.path.exists(finding_dir):
+        os.makedirs(finding_dir, exist_ok=True)
+    
+    for u in [1, 2]:
+        os.makedirs(os.path.join(finding_dir, f"UNIT {u}"), exist_ok=True)
+
+    try:
+        for item in os.listdir(finding_dir):
+            item_path = os.path.join(finding_dir, item)
+            if not os.path.isdir(item_path):
+                continue
+            if item.upper() in ["UNIT 1", "UNIT 2"] or item.startswith("."):
+                continue
+            
+            unit = 2 if "180726" in item else 1
+            comp_name = resolve_finding_folder_name(unit, None, item)
+            target_dir = os.path.join(finding_dir, f"UNIT {unit}", comp_name)
+            
+            if not os.path.exists(target_dir):
+                shutil.move(item_path, target_dir)
+            else:
+                for sub in os.listdir(item_path):
+                    s_path = os.path.join(item_path, sub)
+                    d_path = os.path.join(target_dir, sub)
+                    if not os.path.exists(d_path):
+                        shutil.move(s_path, d_path)
+                shutil.rmtree(item_path, ignore_errors=True)
+    except Exception as e:
+        print(f"Warning: error during finding folders migration: {e}")
+
+# Run initial migration on module load
+migrate_existing_findings_folders()
+
+def handle_get_finding_data(eq_id, unit=1, component_name=None, item_type=None, inst_type=None):
+    folder_name = resolve_finding_folder_name(unit, item_type, eq_id, component_name, inst_type)
+    
+    # 1. Check new unit folder
+    finding_dir = os.path.join(BASE_DIR, "Finding", f"UNIT {unit}", folder_name)
+    rel_folder = f"UNIT {unit}/{folder_name}"
+
+    # 2. Check fallback legacy folder under UNIT {unit}
+    if not os.path.exists(finding_dir):
+        alt_name = sanitize_finding_folder_name(eq_id)
+        alt_dir = os.path.join(BASE_DIR, "Finding", f"UNIT {unit}", alt_name)
+        if os.path.exists(alt_dir):
+            finding_dir = alt_dir
+            rel_folder = f"UNIT {unit}/{alt_name}"
+
+    # 3. Check legacy root Finding/{eq_id}
+    if not os.path.exists(finding_dir):
+        root_dir = os.path.join(BASE_DIR, "Finding", sanitize_finding_folder_name(eq_id))
+        if os.path.exists(root_dir):
+            finding_dir = root_dir
+            rel_folder = sanitize_finding_folder_name(eq_id)
+
     res = {"photos": [], "description": "", "temuan": "", "tindak_lanjut": "", "folder": folder_name}
     if os.path.exists(finding_dir):
         desc_path = os.path.join(finding_dir, "deskripsi.txt")
@@ -1677,21 +2194,24 @@ def handle_get_finding_data(eq_id):
                 else:
                     res["temuan"] = content
         photos = [f for f in os.listdir(finding_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))]
-        res["photos"] = [{"filename": p, "url": f"/findings_media/{folder_name}/{p}"} for p in sorted(photos)]
+        res["photos"] = [{"filename": p, "url": f"/findings_media/{rel_folder}/{p}"} for p in sorted(photos)]
     return res
 
 def handle_finding_photo_save(data):
     eq_id = data.get("id")
-    unit = data.get("unit", 1)
+    unit = int(data.get("unit", 1))
     item_type = data.get("type", "wo")
-    inst_type = data.get("inst_type", "pressure_tx")
+    inst_type = data.get("inst_type", "")
+    component_name = data.get("name") or data.get("component_name")
     image_base64 = data.get("image_base64")
     photo_source_path = data.get("photo_path")
     temuan_text = data.get("temuan", "")
     tindak_lanjut_text = data.get("tindak_lanjut", "")
 
-    folder_name = sanitize_folder_name(eq_id)
-    finding_dir = os.path.join(BASE_DIR, "Finding", folder_name)
+    folder_name = resolve_finding_folder_name(unit, item_type, eq_id, component_name, inst_type)
+    unit_dir = os.path.join(BASE_DIR, "Finding", f"UNIT {unit}")
+    os.makedirs(unit_dir, exist_ok=True)
+    finding_dir = os.path.join(unit_dir, folder_name)
     os.makedirs(finding_dir, exist_ok=True)
 
     desc_file = os.path.join(finding_dir, "deskripsi.txt")
@@ -1731,30 +2251,46 @@ def handle_finding_photo_save(data):
     elif item_type == "instrument":
         save_instrument_update({"unit": unit, "type": inst_type, "no": eq_id, "kks": eq_id, "temuan": temuan_text, "tindak_lanjut": tindak_lanjut_text, "jumlah_foto": num_photos})
 
+    rel_folder = f"UNIT {unit}/{folder_name}"
     return {
         "status": "success",
         "message": "Photo and field findings saved successfully!",
         "jumlah_foto": num_photos,
         "folder": folder_name,
-        "photos": [{"filename": p, "url": f"/findings_media/{folder_name}/{p}"} for p in sorted(photo_files)]
+        "photos": [{"filename": p, "url": f"/findings_media/{rel_folder}/{p}"} for p in sorted(photo_files)]
     }
 
 def handle_finding_photo_delete(data):
     eq_id = data.get("id")
-    unit = data.get("unit", 1)
+    unit = int(data.get("unit", 1))
     filename = data.get("filename")
     item_type = data.get("type", "wo")
-    inst_type = data.get("inst_type", "pressure_tx")
+    inst_type = data.get("inst_type", "")
+    component_name = data.get("name") or data.get("component_name")
 
-    folder_name = sanitize_folder_name(eq_id)
-    finding_dir = os.path.join(BASE_DIR, "Finding", folder_name)
+    folder_name = resolve_finding_folder_name(unit, item_type, eq_id, component_name, inst_type)
+    finding_dir = os.path.join(BASE_DIR, "Finding", f"UNIT {unit}", folder_name)
+    rel_folder = f"UNIT {unit}/{folder_name}"
+
+    if not os.path.exists(finding_dir):
+        alt_name = sanitize_finding_folder_name(eq_id)
+        alt_dir = os.path.join(BASE_DIR, "Finding", f"UNIT {unit}", alt_name)
+        if os.path.exists(alt_dir):
+            finding_dir = alt_dir
+            rel_folder = f"UNIT {unit}/{alt_name}"
+
+    if not os.path.exists(finding_dir):
+        root_dir = os.path.join(BASE_DIR, "Finding", sanitize_finding_folder_name(eq_id))
+        if os.path.exists(root_dir):
+            finding_dir = root_dir
+            rel_folder = sanitize_finding_folder_name(eq_id)
 
     if os.path.exists(finding_dir) and filename:
         target_file = os.path.join(finding_dir, filename)
         if os.path.exists(target_file):
             os.remove(target_file)
 
-    photo_files = [f for f in os.listdir(finding_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))]
+    photo_files = [f for f in os.listdir(finding_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))] if os.path.exists(finding_dir) else []
     num_photos = len(photo_files)
 
     if item_type == "wo":
@@ -1768,7 +2304,7 @@ def handle_finding_photo_delete(data):
         "status": "success",
         "message": "Photo deleted successfully.",
         "jumlah_foto": num_photos,
-        "photos": [{"filename": p, "url": f"/findings_media/{folder_name}/{p}"} for p in sorted(photo_files)]
+        "photos": [{"filename": p, "url": f"/findings_media/{rel_folder}/{p}"} for p in sorted(photo_files)]
     }
 
 class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
@@ -1818,7 +2354,15 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
 
         elif path == "/api/findings":
             eq_id = query.get("id", [""])[0]
-            res = handle_get_finding_data(eq_id)
+            unit = 1
+            try:
+                unit = int(query.get("unit", ["1"])[0])
+            except Exception:
+                unit = 1
+            comp_name = query.get("name", [""])[0]
+            item_type = query.get("type", [""])[0]
+            inst_type = query.get("inst_type", [""])[0]
+            res = handle_get_finding_data(eq_id, unit, comp_name, item_type, inst_type)
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
@@ -1827,7 +2371,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             
         elif path.startswith("/findings_media/"):
             rel_path = path.replace("/findings_media/", "")
-            full_path = os.path.join(BASE_DIR, "Finding", rel_path)
+            full_path = os.path.join(BASE_DIR, "Finding", urllib.parse.unquote(rel_path))
             if os.path.exists(full_path) and os.path.isfile(full_path):
                 mime, _ = mimetypes.guess_type(full_path)
                 self.send_response(200)
@@ -1859,6 +2403,25 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(file_bytes)))
             self.end_headers()
             self.wfile.write(file_bytes)
+            return
+
+        elif parsed.path == "/api/export_wo_mapping":
+            unit = 1
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "unit" in qs:
+                try: unit = int(qs["unit"][0])
+                except: unit = 1
+            res_bytes, filename = generate_wo_mapping_excel(unit)
+            if not res_bytes:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(res_bytes)))
+            self.end_headers()
+            self.wfile.write(res_bytes)
             return
                 
         return super().do_GET()
@@ -1898,7 +2461,8 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             "/api/delete_actuator": save_delete_actuator,
             "/api/add_instrument": save_add_instrument,
             "/api/delete_instrument": save_delete_instrument,
-            "/api/edit_details": save_edit_details
+            "/api/edit_details": save_edit_details,
+            "/api/rollover_outage": handle_rollover_outage
         }
 
         if parsed.path in routes:
@@ -2070,6 +2634,81 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
         }
         .btn-print:hover { background: var(--primary); color: #fff; }
+
+        .btn-rollover {
+            padding: 8px 16px; background: rgba(244, 63, 94, 0.1); border: 1px solid rgba(244, 63, 94, 0.3);
+            color: #f43f5e; border-radius: var(--radius-md); font-weight: 600; font-size: 0.85rem;
+            cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+        }
+        .btn-rollover:hover { background: #f43f5e; color: #fff; box-shadow: 0 4px 12px rgba(244, 63, 94, 0.3); }
+
+        /* Rollover Wizard Styling */
+        .rollover-step-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-bottom: 14px;
+        }
+        .rollover-step-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--text-main);
+            margin-bottom: 10px;
+        }
+        .step-badge {
+            background: var(--primary);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 12px;
+            text-transform: uppercase;
+        }
+        .rollover-method-toggle {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 8px;
+        }
+        .method-card {
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--bg-body);
+        }
+        .method-card.active {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.06);
+        }
+        .method-card:hover {
+            border-color: var(--primary);
+        }
+        .method-card input[type="radio"] {
+            margin-right: 6px;
+        }
+        .rollover-danger-banner {
+            background: rgba(244, 63, 94, 0.08);
+            border: 1px solid rgba(244, 63, 94, 0.35);
+            border-radius: var(--radius-md);
+            padding: 14px 16px;
+            margin-top: 14px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 0.84rem;
+            color: var(--text-main);
+        }
+        .rollover-danger-banner svg {
+            color: #f43f5e;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
 
         .container { max-width: 1440px; margin: 24px auto; padding: 0 24px; }
 
@@ -3647,6 +4286,206 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Rollover Master Authorization Password Modal -->
+    <div class="modal-overlay" id="rollover-auth-modal">
+        <div class="modal-content" style="max-width: 440px; padding: 24px;">
+            <div class="modal-header" style="margin-bottom: 14px;">
+                <div>
+                    <h3 style="color:#f43f5e; font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        Master Outage Rollover
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Enter master authorization password to access Annual Outage Rollover & Progress Reset.</div>
+                </div>
+                <button class="modal-close" onclick="closeRolloverAuthModal()">&times;</button>
+            </div>
+            
+            <form onsubmit="submitRolloverAuth(event)" style="margin-top: 10px;">
+                <div class="form-group" style="margin-bottom: 14px;">
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main);">Master Password:</label>
+                    <div style="position:relative; display:flex; align-items:center;">
+                        <input type="password" id="rollover-pwd-input" class="filter-input" placeholder="Enter master password..." style="width:100%; padding:10px 38px 10px 12px; font-size:0.95rem; font-family:'Inter', sans-serif;" autocomplete="current-password">
+                        <button type="button" onclick="toggleRolloverPwdVisibility()" style="position:absolute; right:10px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1rem; display:flex; align-items:center;" title="Show / Hide Password" id="rollover-pwd-eye-btn">
+                            <svg class="ui-icon md" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
+                    </div>
+                    <div id="rollover-pwd-error" style="color:#f43f5e; font-size:0.78rem; font-weight:700; margin-top:6px; display:none;">Incorrect password! Please try again.</div>
+                </div>
+                
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
+                    <button type="button" class="page-btn" onclick="closeRolloverAuthModal()">Cancel</button>
+                    <button type="submit" class="btn-save" style="padding:9px 20px; background:linear-gradient(135deg, #f43f5e, #e11d48); display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> Unlock Rollover
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Annual Outage Rollover & Reset Wizard Modal -->
+    <div class="modal-overlay" id="rollover-wizard-modal">
+        <div class="modal-content" style="max-width: 720px; max-height: 90vh; overflow-y: auto; padding: 24px;">
+            <div class="modal-header" style="margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <div>
+                    <h3 style="color:#f43f5e; font-size:1.25rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><polyline points="16 21 21 21 21 16"></polyline></svg>
+                        Annual Outage Rollover & Campaign Setup
+                    </h3>
+                    <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">Automated Work Order remapping, progress reset, and archival for next year's overhaul campaign.</div>
+                </div>
+                <button class="modal-close" onclick="closeRolloverWizard()">&times;</button>
+            </div>
+
+            <!-- Wizard Section 1: Target Unit -->
+            <div class="rollover-step-card">
+                <div class="rollover-step-header">
+                    <span class="step-badge">Step 1</span>
+                    <span>Pilih Unit Sasaran (Target Unit)</span>
+                </div>
+                <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                    <label style="cursor:pointer; font-weight:600; font-size:0.88rem; display:inline-flex; align-items:center; gap:6px;">
+                        <input type="radio" name="rollover-unit-choice" value="1" checked onchange="handleRolloverUnitChange()"> UNIT 1
+                    </label>
+                    <label style="cursor:pointer; font-weight:600; font-size:0.88rem; display:inline-flex; align-items:center; gap:6px;">
+                        <input type="radio" name="rollover-unit-choice" value="2" onchange="handleRolloverUnitChange()"> UNIT 2
+                    </label>
+                    <label style="cursor:pointer; font-weight:600; font-size:0.88rem; display:inline-flex; align-items:center; gap:6px;">
+                        <input type="radio" name="rollover-unit-choice" value="both" onchange="handleRolloverUnitChange()"> KEDUANYA (UNIT 1 & UNIT 2)
+                    </label>
+                </div>
+            </div>
+
+            <!-- Wizard Section 2: Download Mapping Template -->
+            <div class="rollover-step-card">
+                <div class="rollover-step-header">
+                    <span class="step-badge">Step 2</span>
+                    <span>Download Master Mapping Template (.xlsx)</span>
+                </div>
+                <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:10px;">
+                    Unduh file Excel mapping untuk melihat seluruh daftar Work Order aktif. Anda dapat mengisi kolom <code>New_No_WO</code> dengan nomor WO baru dari CMMS (SAP/Maximo).
+                </p>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button type="button" class="page-btn" onclick="downloadWoMapping(1)" style="padding:7px 14px; font-size:0.82rem; display:inline-flex; align-items:center; gap:6px; background:rgba(99,102,241,0.08); border-color:var(--primary); color:var(--primary);">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Unit 1 Mapping (.xlsx)
+                    </button>
+                    <button type="button" class="page-btn" onclick="downloadWoMapping(2)" style="padding:7px 14px; font-size:0.82rem; display:inline-flex; align-items:center; gap:6px; background:rgba(99,102,241,0.08); border-color:var(--primary); color:var(--primary);">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Unit 2 Mapping (.xlsx)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Wizard Section 3: Mapping Method -->
+            <div class="rollover-step-card">
+                <div class="rollover-step-header">
+                    <span class="step-badge">Step 3</span>
+                    <span>Pilih Metode Pemetaan Nomor WO Baru</span>
+                </div>
+                <div class="rollover-method-toggle">
+                    <div class="method-card active" id="card-method-excel" onclick="selectRolloverMethod('excel_upload')">
+                        <label style="cursor:pointer; font-weight:700; font-size:0.88rem; display:flex; align-items:center; gap:6px;">
+                            <input type="radio" name="rollover-method" value="excel_upload" checked>
+                            <span>Unggah File Excel Mapping</span>
+                        </label>
+                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Cocok jika nomor WO baru di-generate secara custom atau acak oleh sistem SAP/Maximo.</div>
+                    </div>
+                    <div class="method-card" id="card-method-prefix" onclick="selectRolloverMethod('prefix_replace')">
+                        <label style="cursor:pointer; font-weight:700; font-size:0.88rem; display:flex; align-items:center; gap:6px;">
+                            <input type="radio" name="rollover-method" value="prefix_replace">
+                            <span>Ganti Pola Prefix (Quick)</span>
+                        </label>
+                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Cocok jika nomor WO baru hanya berubah kode tanggal (contoh: <code>WO-100826-</code> &rarr; <code>WO-150827-</code>).</div>
+                    </div>
+                </div>
+
+                <!-- Method Detail: File Upload -->
+                <div id="method-detail-excel" style="margin-top:14px;">
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:6px;">Pilih File Excel Mapping yang Sudah Diisi (.xlsx):</label>
+                    <input type="file" id="rollover-file-input" accept=".xlsx" class="filter-input" style="width:100%; padding:8px;" onchange="handleRolloverFileChange(this)">
+                    <div id="rollover-file-info" style="font-size:0.78rem; color:#10b981; font-weight:700; margin-top:4px; display:none;"></div>
+                </div>
+
+                <!-- Method Detail: Prefix Replace -->
+                <div id="method-detail-prefix" style="margin-top:14px; display:none;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                        <div>
+                            <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Prefix WO Lama:</label>
+                            <input type="text" id="rollover-prefix-old" class="filter-input" placeholder="e.g. WO-100826-" style="width:100%; font-family:'JetBrains Mono', monospace;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Prefix WO Baru:</label>
+                            <input type="text" id="rollover-prefix-new" class="filter-input" placeholder="e.g. WO-150827-" style="width:100%; font-family:'JetBrains Mono', monospace;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wizard Section 4: Schedule & Archive -->
+            <div class="rollover-step-card">
+                <div class="rollover-step-header">
+                    <span class="step-badge">Step 4</span>
+                    <span>Jadwal Outage Baru & Label Arsip</span>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px;">
+                    <div>
+                        <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Outage Start Date (Baru):</label>
+                        <input type="date" id="rollover-start-date" class="filter-input" style="width:100%;">
+                    </div>
+                    <div>
+                        <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Outage Finish Date (Baru):</label>
+                        <input type="date" id="rollover-finish-date" class="filter-input" style="width:100%;">
+                    </div>
+                </div>
+                <div>
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Label Folder Arsip Cadangan:</label>
+                    <input type="text" id="rollover-archive-label" class="filter-input" value="Outage_2026_Final" style="width:100%;">
+                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">Data saat ini akan otomatis dicadangkan ke <code>Archive/&lt;Label&gt;_&lt;Timestamp&gt;/</code>.</div>
+                </div>
+            </div>
+
+            <!-- Wizard Section 5: Reset Options & Confirmation -->
+            <div class="rollover-step-card">
+                <div class="rollover-step-header">
+                    <span class="step-badge">Step 5</span>
+                    <span>Cakupan Reset Sistem</span>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.84rem;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-opt-archive" checked disabled> <strong>Auto-Archive (Wajib)</strong>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-opt-checklists" checked> Reset Checklists ke 0% (SCHED-OK)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-opt-actuators" checked> Reset Actuator Valves ke 0%
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-opt-instruments" checked> Reset Seluruh Instrumen ke 0%
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                        <input type="checkbox" id="chk-opt-findings" checked> Bersihkan Temuan & Kuantitas Foto
+                    </label>
+                </div>
+
+                <div class="rollover-danger-banner">
+                    <svg class="ui-icon md" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    <div>
+                        <strong style="color:#f43f5e;">PERHATIAN &bull; OPERASI DESTRUKTIF:</strong>
+                        <div>Tindakan ini akan memperbarui Nomor WO dan mereset seluruh progress sistem ke 0%. Seluruh file database master saat ini dan foto-foto temuan akan secara otomatis dicadangkan terlebih dahulu ke folder <code>Archive/</code>.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Action Buttons -->
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px; border-top:1px solid var(--border-color); padding-top:14px;">
+                <button type="button" class="page-btn" onclick="closeRolloverWizard()">Batal</button>
+                <button type="button" id="btn-execute-rollover" class="btn-save" onclick="executeRolloverSubmit()" style="padding:10px 24px; background:linear-gradient(135deg, #f43f5e, #dc2626); box-shadow:0 4px 14px rgba(244,63,94,0.35); font-weight:700; display:inline-flex; align-items:center; gap:8px;">
+                    <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    <span>Eksekusi Outage Rollover & Reset Progress</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Header -->
     <header>
         <div class="logo-area">
@@ -3665,6 +4504,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             </button>
             <button class="btn-print" onclick="openReportModal()" title="Open Reports / Export PDF" style="display:inline-flex; align-items:center; gap:6px;">
                 <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Reports
+            </button>
+            <button class="btn-rollover" onclick="openRolloverAuthModal()" title="Annual Outage Rollover & Reset" style="display:inline-flex; align-items:center; gap:6px;">
+                <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><polyline points="16 21 21 21 21 16"></polyline></svg> Rollover
             </button>
         </div>
     </header>
@@ -5227,15 +6069,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         /* ---------------- FINDING & PHOTO MODAL ---------------- */
-        async function openFindingModal(itemType, id, title, area, temuan, tindakLanjut, instType = '') {
-            activeFinding = { itemType, id, title, area, temuan, tindakLanjut, instType };
-            document.getElementById('modal-finding-title').innerText = `Findings & Photos: ${id}`;
-            document.getElementById('modal-finding-subtitle').innerText = `${title} (${area || 'GENERAL'})`;
+        async function openFindingModal(itemType, id, title, area, temuan, tindakLanjut, instType = '', compName = '') {
+            if(!compName && title && title.includes(' - ')) {
+                compName = title.split(' - ').slice(1).join(' - ').trim();
+            }
+            if(!compName) compName = title || id;
+
+            activeFinding = { itemType, id, title, area, temuan, tindakLanjut, instType, name: compName };
+            document.getElementById('modal-finding-title').innerText = `Findings & Photos (Unit ${currentUnit}): ${compName}`;
+            document.getElementById('modal-finding-subtitle').innerText = `${id} — ${area || 'GENERAL'}`;
             document.getElementById('modal-finding-text').value = temuan || '';
             document.getElementById('modal-tl-text').value = tindakLanjut || '';
 
             try {
-                const res = await fetch(`/api/findings?id=${encodeURIComponent(id)}`);
+                const res = await fetch(`/api/findings?id=${encodeURIComponent(id)}&unit=${currentUnit}&name=${encodeURIComponent(compName)}&type=${encodeURIComponent(itemType)}&inst_type=${encodeURIComponent(instType)}`);
                 const data = await res.json();
                 renderModalPhotos(data.photos || []);
                 if(data.temuan) document.getElementById('modal-finding-text').value = data.temuan;
@@ -5466,6 +6313,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         const payload = {
                             id: activeFinding.id,
                             unit: currentUnit,
+                            name: activeFinding.name || activeFinding.title,
                             type: activeFinding.itemType,
                             inst_type: activeFinding.instType,
                             filename: file.name,
@@ -5502,6 +6350,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const payload = {
                     id: activeFinding.id,
                     unit: currentUnit,
+                    name: activeFinding.name || activeFinding.title,
                     filename: filename,
                     type: activeFinding.itemType,
                     inst_type: activeFinding.instType
@@ -5531,6 +6380,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const payload = {
                     id: activeFinding.id,
                     unit: currentUnit,
+                    name: activeFinding.name || activeFinding.title,
                     type: activeFinding.itemType,
                     inst_type: activeFinding.instType,
                     temuan: temuan,
@@ -7150,6 +8000,279 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             sessionStorage.removeItem('eic_scope_unlocked');
             showToast('Master EIC Edit Mode Locked', 'info');
             renderTabContent();
+        }
+
+        /* ---------------- ANNUAL OUTAGE ROLLOVER & RESET LOGIC ---------------- */
+        let verifiedRolloverPassword = '';
+        let rolloverUploadedBase64 = '';
+
+        function openRolloverAuthModal() {
+            const modal = document.getElementById('rollover-auth-modal');
+            const input = document.getElementById('rollover-pwd-input');
+            const err = document.getElementById('rollover-pwd-error');
+            if(err) err.style.display = 'none';
+            if(input) {
+                input.value = '';
+                input.type = 'password';
+            }
+            if(modal) {
+                modal.classList.add('open');
+                modal.classList.add('active');
+                setTimeout(() => { if(input) input.focus(); }, 150);
+            }
+        }
+
+        function closeRolloverAuthModal() {
+            const modal = document.getElementById('rollover-auth-modal');
+            if(modal) {
+                modal.classList.remove('open');
+                modal.classList.remove('active');
+            }
+        }
+
+        function toggleRolloverPwdVisibility() {
+            const input = document.getElementById('rollover-pwd-input');
+            const btn = document.getElementById('rollover-pwd-eye-btn');
+            if(!input) return;
+            const isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            if(btn) btn.innerHTML = isPassword ? Icons.eyeOff : Icons.eye;
+        }
+
+        function submitRolloverAuth(e) {
+            if(e) e.preventDefault();
+            const input = document.getElementById('rollover-pwd-input');
+            const err = document.getElementById('rollover-pwd-error');
+            const val = (input ? input.value : '').trim();
+
+            if(MASTER_PASSWORDS.includes(val.toLowerCase()) || val === 'eic123' || val === 'admin123' || val === 'admin@msw') {
+                verifiedRolloverPassword = val;
+                closeRolloverAuthModal();
+                openRolloverWizard();
+            } else {
+                if(err) err.style.display = 'block';
+                if(input) {
+                    input.classList.add('shake-error');
+                    setTimeout(() => input.classList.remove('shake-error'), 500);
+                    input.select();
+                }
+            }
+        }
+
+        function openRolloverWizard() {
+            const modal = document.getElementById('rollover-wizard-modal');
+            if(!modal) return;
+            
+            const archiveInput = document.getElementById('rollover-archive-label');
+            if(archiveInput) {
+                const year = new Date().getFullYear();
+                archiveInput.value = `Outage_${year}_Final_Archive`;
+            }
+
+            if(fullData && fullData.outage_start && fullData.outage_finish) {
+                const startInp = document.getElementById('rollover-start-date');
+                const finishInp = document.getElementById('rollover-finish-date');
+                if(startInp && !startInp.value) startInp.value = fullData.outage_start;
+                if(finishInp && !finishInp.value) finishInp.value = fullData.outage_finish;
+            }
+
+            const oldPref = document.getElementById('rollover-prefix-old');
+            const newPref = document.getElementById('rollover-prefix-new');
+            if(oldPref && !oldPref.value) oldPref.value = currentUnit === 1 ? 'WO-100826-' : 'WO-180726-';
+            if(newPref && !newPref.value) newPref.value = currentUnit === 1 ? 'WO-150827-' : 'WO-180727-';
+
+            selectRolloverMethod('excel_upload');
+            rolloverUploadedBase64 = '';
+            const fileInfo = document.getElementById('rollover-file-info');
+            if(fileInfo) fileInfo.style.display = 'none';
+
+            modal.classList.add('open');
+            modal.classList.add('active');
+        }
+
+        function closeRolloverWizard() {
+            const modal = document.getElementById('rollover-wizard-modal');
+            if(modal) {
+                modal.classList.remove('open');
+                modal.classList.remove('active');
+            }
+        }
+
+        function handleRolloverUnitChange() {
+            const radios = document.getElementsByName('rollover-unit-choice');
+            let sel = '1';
+            for(let r of radios) { if(r.checked) sel = r.value; }
+            const oldPref = document.getElementById('rollover-prefix-old');
+            const newPref = document.getElementById('rollover-prefix-new');
+            if(oldPref && newPref) {
+                if(sel === '2') {
+                    oldPref.value = 'WO-180726-';
+                    newPref.value = 'WO-180727-';
+                } else {
+                    oldPref.value = 'WO-100826-';
+                    newPref.value = 'WO-150827-';
+                }
+            }
+        }
+
+        function downloadWoMapping(unit) {
+            window.location.href = `/api/export_wo_mapping?unit=${unit}`;
+            showToast(`Generating mapping template for Unit ${unit}...`, 'info');
+        }
+
+        function selectRolloverMethod(method) {
+            const cardExcel = document.getElementById('card-method-excel');
+            const cardPrefix = document.getElementById('card-method-prefix');
+            const detailExcel = document.getElementById('method-detail-excel');
+            const detailPrefix = document.getElementById('method-detail-prefix');
+            
+            const radios = document.getElementsByName('rollover-method');
+            for(let r of radios) {
+                r.checked = (r.value === method);
+            }
+
+            if(method === 'excel_upload') {
+                if(cardExcel) cardExcel.classList.add('active');
+                if(cardPrefix) cardPrefix.classList.remove('active');
+                if(detailExcel) detailExcel.style.display = 'block';
+                if(detailPrefix) detailPrefix.style.display = 'none';
+            } else {
+                if(cardExcel) cardExcel.classList.remove('active');
+                if(cardPrefix) cardPrefix.classList.add('active');
+                if(detailExcel) detailExcel.style.display = 'none';
+                if(detailPrefix) detailPrefix.style.display = 'block';
+            }
+        }
+
+        function handleRolloverFileChange(input) {
+            const file = input.files[0];
+            const info = document.getElementById('rollover-file-info');
+            if(!file) {
+                rolloverUploadedBase64 = '';
+                if(info) info.style.display = 'none';
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                rolloverUploadedBase64 = e.target.result;
+                if(info) {
+                    info.innerHTML = `✓ File siap: <strong>${file.name}</strong> (${(file.size/1024).toFixed(1)} KB)`;
+                    info.style.display = 'block';
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function executeRolloverSubmit() {
+            if(!verifiedRolloverPassword) {
+                alert('Session password expired. Please unlock again.');
+                closeRolloverWizard();
+                openRolloverAuthModal();
+                return;
+            }
+
+            const unitRadios = document.getElementsByName('rollover-unit-choice');
+            let unitChoice = '1';
+            for(let r of unitRadios) { if(r.checked) unitChoice = r.value; }
+            let units = [];
+            if(unitChoice === 'both') units = [1, 2];
+            else units = [parseInt(unitChoice)];
+
+            const methodRadios = document.getElementsByName('rollover-method');
+            let methodChoice = 'excel_upload';
+            for(let r of methodRadios) { if(r.checked) methodChoice = r.value; }
+
+            const prefixOld = (document.getElementById('rollover-prefix-old').value || '').trim();
+            const prefixNew = (document.getElementById('rollover-prefix-new').value || '').trim();
+
+            if(methodChoice === 'excel_upload' && !rolloverUploadedBase64) {
+                alert('Silakan pilih file Excel template mapping terlebih dahulu atau gunakan metode Ganti Pola Prefix!');
+                return;
+            }
+            if(methodChoice === 'prefix_replace' && (!prefixOld || !prefixNew)) {
+                alert('Silakan isi Prefix WO Lama dan Prefix WO Baru!');
+                return;
+            }
+
+            const startDate = document.getElementById('rollover-start-date').value;
+            const finishDate = document.getElementById('rollover-finish-date').value;
+            if(!startDate || !finishDate) {
+                alert('Silakan pilih Outage Start Date dan Outage Finish Date untuk jadwal S-Curve tahun baru!');
+                return;
+            }
+
+            const archiveLabel = (document.getElementById('rollover-archive-label').value || 'Annual_Outage').trim();
+
+            const confirmMsg = `PERINGATAN KONFIRMASI!\n\nApakah Anda yakin ingin mengeksekusi Outage Rollover untuk Unit: ${units.join(', ')}?\n\n` +
+                               `• Data saat ini akan diarsipkan otomatis ke folder Archive/\n` +
+                               `• Nomor WO akan diperbarui\n` +
+                               `• Seluruh progress akan DI-RESET ke 0% (SCHED-OK)\n` +
+                               `• Jadwal Outage baru: ${startDate} s/d ${finishDate}\n\n` +
+                               `Ketik 'OK' atau klik OK untuk melanjutkan.`;
+            
+            if(!confirm(confirmMsg)) return;
+
+            const btn = document.getElementById('btn-execute-rollover');
+            const origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<svg class="ui-icon sm spin" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Memproses Rollover & Backup...`;
+
+            try {
+                const payload = {
+                    password: verifiedRolloverPassword,
+                    units: units,
+                    method: methodChoice,
+                    prefix_old: prefixOld,
+                    prefix_new: prefixNew,
+                    mapping_file_base64: rolloverUploadedBase64,
+                    start_date: startDate,
+                    finish_date: finishDate,
+                    archive_label: archiveLabel,
+                    options: {
+                        auto_archive: true,
+                        reset_checklists: document.getElementById('chk-opt-checklists').checked,
+                        reset_actuators: document.getElementById('chk-opt-actuators').checked,
+                        reset_instruments: document.getElementById('chk-opt-instruments').checked,
+                        reset_findings: document.getElementById('chk-opt-findings').checked
+                    }
+                };
+
+                const res = await fetch('/api/rollover_outage', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if(data.status === 'success') {
+                    closeRolloverWizard();
+                    const s = data.stats || {};
+                    let msg = `✓ OUTAGE ROLLOVER BERHASIL!\n\n` +
+                              `• Unit: ${units.join(', ')}\n` +
+                              `• WO Diperbarui: ${s.wos_updated} WO\n` +
+                              `• Subtasks Diremap: ${s.subtasks_remapped} Tasks\n`;
+                    if(s.areas_updated) {
+                        msg += `• Area Diperbarui: ${s.areas_updated} WO Area\n`;
+                    }
+                    if(s.descriptions_updated) {
+                        msg += `• Deskripsi Diperbarui: ${s.descriptions_updated} WO Deskripsi\n`;
+                    }
+                    msg += `• Data Lama Diarsipkan ke: ${s.archive_dir || 'Archive/'}\n` +
+                           `• Seluruh progress telah di-reset ke 0%.`;
+                    alert(msg);
+                    showToast('✓ Outage Rollover successfully executed! Refreshing...', 'success', 5000);
+                    await loadData();
+                } else {
+                    alert('Gagal mengeksekusi Rollover: ' + (data.message || 'Unknown error'));
+                    showToast('Error: ' + data.message, 'error', 4000);
+                }
+            } catch(e) {
+                alert('Terjadi kesalahan jaringan atau server: ' + e.message);
+                showToast('Rollover Error: ' + e.message, 'error', 4000);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+            }
         }
 
         async function saveNewScope() {
