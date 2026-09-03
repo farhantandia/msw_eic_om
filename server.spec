@@ -1,16 +1,47 @@
-# -*- mode: python ; coding: utf-8 -*-
+import os
 
+conda_lib_bin = r'D:\miniconda3\Library\bin'
+required_binaries = []
+for dll_name in ['libexpat.dll', 'libcrypto-3-x64.dll', 'libssl-3-x64.dll', 'liblzma.dll', 'LIBBZ2.dll']:
+    dll_path = os.path.join(conda_lib_bin, dll_name)
+    if os.path.exists(dll_path):
+        required_binaries.append((dll_path, '.'))
 
 a = Analysis(
     ['server.py'],
     pathex=[],
-    binaries=[],
+    binaries=required_binaries,
     datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'numpy',
+        'pandas',
+        'scipy',
+        'matplotlib',
+        'PIL',
+        'Pillow',
+        'tkinter',
+        '_tkinter',
+        'tcl',
+        'tk',
+        'sqlite3',
+        'unittest',
+        'pytest',
+        'IPython',
+        'jupyter',
+        'tornado',
+        'zmq',
+        'pygments',
+        'scipy',
+        'statsmodels',
+        'numba',
+        'llvmlite',
+        'botocore',
+        'boto3',
+    ],
     noarchive=False,
     optimize=0,
 )
