@@ -45,6 +45,12 @@ def get_excel_path(unit):
             return path
     return candidates[0]
 
+def get_header_col_index(ws, col_name):
+    for c in range(1, ws.max_column + 1):
+        if str(ws.cell(1, c).value or '').strip() == col_name:
+            return c
+    return None
+
 def clean_val(val):
     if val is None:
         return ""
@@ -628,8 +634,11 @@ def load_master_components(unit):
         actuators = []
         if "ActuatorValve" in wb.sheetnames:
             ws = wb["ActuatorValve"]
+            headers = [cell.value for cell in ws[1]]
+            wo_idx = headers.index("No_WO") if "No_WO" in headers else None
             for r in list(ws.iter_rows(values_only=True))[1:]:
                 if r[0] or r[2]:
+                    no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
                     actuators.append({
                         "equipment_id": clean_val(r[0]),
                         "area": clean_val(r[1]) or "BOILER",
@@ -637,7 +646,8 @@ def load_master_components(unit):
                         "kks": clean_val(r[3]),
                         "pic": normalize_pic(clean_val(r[5])),
                         "status": clean_val(r[6]) or "SCHED-OK",
-                        "persen_progress": clean_val(r[7]) or 0
+                        "persen_progress": clean_val(r[7]) or 0,
+                        "no_wo": no_wo_val
                     })
                     
         instruments = []
@@ -649,8 +659,11 @@ def load_master_components(unit):
         for sname, itype, ilabel in inst_sheets:
             if sname in wb.sheetnames:
                 ws = wb[sname]
+                headers = [cell.value for cell in ws[1]]
+                wo_idx = headers.index("No_WO") if "No_WO" in headers else None
                 for r in list(ws.iter_rows(values_only=True))[1:]:
                     if r[2]:
+                        no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
                         instruments.append({
                             "no": clean_val(r[0]),
                             "area": clean_val(r[1]) or "GENERAL",
@@ -659,7 +672,8 @@ def load_master_components(unit):
                             "type": itype,
                             "type_label": ilabel,
                             "range": clean_val(r[5]) if len(r)>5 else "",
-                            "status_wdone": bool(r[13] if sname=="Instrument_PressureSwitch" else r[7])
+                            "status_wdone": bool(r[13] if sname=="Instrument_PressureSwitch" else r[7]),
+                            "no_wo": no_wo_val
                         })
                         
     return {"actuators": actuators, "instruments": instruments}
@@ -890,6 +904,7 @@ def save_add_actuator(data):
     area = str(data.get("area", "")).strip() or "BOILER"
     kks = str(data.get("kks", "")).strip()
     pic = str(data.get("pic", "")).strip()
+    no_wo = str(data.get("no_wo", "")).strip()
     
     if not eq_id or not desc:
         return {"status": "error", "message": "Equipment ID dan Description wajib diisi."}
@@ -899,7 +914,13 @@ def save_add_actuator(data):
         wb = openpyxl.load_workbook(path)
         if "ActuatorValve" in wb.sheetnames:
             ws = wb["ActuatorValve"]
-            ws.append([eq_id, area, desc, kks, unit, pic, "SCHED-OK", 0, None, False, False, None, None, None, 0])
+            wo_col = get_header_col_index(ws, "No_WO")
+            new_row = [eq_id, area, desc, kks, unit, pic, "SCHED-OK", 0, None, False, False, None, None, None, 0]
+            if wo_col and wo_col == 16:
+                new_row.append(no_wo)
+            ws.append(new_row)
+            if wo_col and wo_col != 16:
+                ws.cell(row=ws.max_row, column=wo_col, value=no_wo)
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
     return {"status": "success", "message": f"Actuator Valve '{eq_id}' successfully added!"}
@@ -982,6 +1003,7 @@ def save_add_instrument(data):
     set_point = str(data.get("set_point", "")).strip()
     contact_type = str(data.get("contact_type", "NO")).strip() or "NO"
     rng = str(data.get("range", "")).strip()
+    no_wo = str(data.get("no_wo", "")).strip()
     
     if not eq:
         return {"status": "error", "message": "Equipment description is required."}
@@ -1001,11 +1023,22 @@ def save_add_instrument(data):
         if sname and sname in wb.sheetnames:
             ws = wb[sname]
             max_no = ws.max_row
+            wo_col = get_header_col_index(ws, "No_WO")
             if inst_type in ["pressure_switch", "psw"]:
                 sp_val = set_point or rng
-                ws.append([max_no, area, eq, kks, unit, sub_area or area, sp_val, contact_type, None, None, None, None, "OK", False, None, None, None, None, None, 0, False])
+                new_row = [max_no, area, eq, kks, unit, sub_area or area, sp_val, contact_type, None, None, None, None, "OK", False, None, None, None, None, None, 0, False]
+                if wo_col and wo_col == 22:
+                    new_row.append(no_wo)
+                ws.append(new_row)
+                if wo_col and wo_col != 22:
+                    ws.cell(row=ws.max_row, column=wo_col, value=no_wo)
             else:
-                ws.append([max_no, area, eq, kks, unit, rng or set_point, None, False, None, None, None, 0, False])
+                new_row = [max_no, area, eq, kks, unit, rng or set_point, None, False, None, None, None, 0, False]
+                if wo_col and wo_col == 14:
+                    new_row.append(no_wo)
+                ws.append(new_row)
+                if wo_col and wo_col != 14:
+                    ws.cell(row=ws.max_row, column=wo_col, value=no_wo)
             ok, err = safe_save_workbook(wb, path)
             if not ok: return {"status": "error", "message": err}
     return {"status": "success", "message": f"Instrument '{eq}' successfully added!"}
@@ -1099,6 +1132,8 @@ def load_unit_data(unit):
         act_list = []
         if "ActuatorValve" in wb.sheetnames:
             ws = wb["ActuatorValve"]
+            headers = [cell.value for cell in ws[1]]
+            wo_idx = headers.index("No_WO") if "No_WO" in headers else None
             for r in list(ws.iter_rows(values_only=True))[1:]:
                 if r[0] or r[2]:
                     raw_st = clean_val(r[6])
@@ -1106,6 +1141,8 @@ def load_unit_data(unit):
                         clean_st = "FINISH" if raw_st else "SCHED-OK"
                     else:
                         clean_st = str(raw_st or "SCHED-OK")
+                    no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
+                    wo_desc = wo_map.get(no_wo_val, {}).get("job_description", "") if no_wo_val else ""
                     act_list.append({
                         "equipment_id": clean_val(r[0]),
                         "area": clean_val(r[1]) or "BOILER",
@@ -1121,17 +1158,23 @@ def load_unit_data(unit):
                         "remarks": clean_val(r[11]),
                         "temuan": clean_val(r[12]),
                         "tindak_lanjut": clean_val(r[13]),
-                        "jumlah_foto": clean_val(r[14]) or 0
+                        "jumlah_foto": clean_val(r[14]) or 0,
+                        "no_wo": no_wo_val,
+                        "wo_desc": wo_desc
                     })
                     
         # 3. Instruments (2 Checklists: Kalibrasi & Verifikasi, finish determiner = Verifikasi)
         ptx_list = []
         if "Instrument_PressureTX" in wb.sheetnames:
             ws = wb["Instrument_PressureTX"]
+            headers = [cell.value for cell in ws[1]]
+            wo_idx = headers.index("No_WO") if "No_WO" in headers else None
             for r in list(ws.iter_rows(values_only=True))[1:]:
                 if r[2]:
                     is_verif = bool(r[7])
                     is_calib = bool(r[12]) if len(r) > 12 and r[12] is not None else is_verif
+                    no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
+                    wo_desc = wo_map.get(no_wo_val, {}).get("job_description", "") if no_wo_val else ""
                     ptx_list.append({
                         "no": clean_val(r[0]),
                         "area": clean_val(r[1]) or "GENERAL",
@@ -1146,16 +1189,22 @@ def load_unit_data(unit):
                         "remarks": clean_val(r[8]),
                         "temuan": clean_val(r[9]),
                         "tindak_lanjut": clean_val(r[10]),
-                        "jumlah_foto": clean_val(r[11]) or 0
+                        "jumlah_foto": clean_val(r[11]) or 0,
+                        "no_wo": no_wo_val,
+                        "wo_desc": wo_desc
                     })
                     
         ttx_list = []
         if "Instrument_TemperatureTX" in wb.sheetnames:
             ws = wb["Instrument_TemperatureTX"]
+            headers = [cell.value for cell in ws[1]]
+            wo_idx = headers.index("No_WO") if "No_WO" in headers else None
             for r in list(ws.iter_rows(values_only=True))[1:]:
                 if r[2]:
                     is_verif = bool(r[7])
                     is_calib = bool(r[12]) if len(r) > 12 and r[12] is not None else is_verif
+                    no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
+                    wo_desc = wo_map.get(no_wo_val, {}).get("job_description", "") if no_wo_val else ""
                     ttx_list.append({
                         "no": clean_val(r[0]),
                         "area": clean_val(r[1]) or "BOILER",
@@ -1170,16 +1219,22 @@ def load_unit_data(unit):
                         "remarks": clean_val(r[8]),
                         "temuan": clean_val(r[9]),
                         "tindak_lanjut": clean_val(r[10]),
-                        "jumlah_foto": clean_val(r[11]) or 0
+                        "jumlah_foto": clean_val(r[11]) or 0,
+                        "no_wo": no_wo_val,
+                        "wo_desc": wo_desc
                     })
                     
         psw_list = []
         if "Instrument_PressureSwitch" in wb.sheetnames:
             ws = wb["Instrument_PressureSwitch"]
+            headers = [cell.value for cell in ws[1]]
+            wo_idx = headers.index("No_WO") if "No_WO" in headers else None
             for r in list(ws.iter_rows(values_only=True))[1:]:
                 if r[2]:
                     is_verif = bool(r[13])
                     is_calib = bool(r[20]) if len(r) > 20 and r[20] is not None else is_verif
+                    no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
+                    wo_desc = wo_map.get(no_wo_val, {}).get("job_description", "") if no_wo_val else ""
                     psw_list.append({
                         "no": clean_val(r[0]),
                         "area": clean_val(r[1]) or "BOILER",
@@ -1203,7 +1258,9 @@ def load_unit_data(unit):
                         "remarks": clean_val(r[16]),
                         "temuan": clean_val(r[17]),
                         "tindak_lanjut": clean_val(r[18]),
-                        "jumlah_foto": clean_val(r[19]) or 0
+                        "jumlah_foto": clean_val(r[19]) or 0,
+                        "no_wo": no_wo_val,
+                        "wo_desc": wo_desc
                     })
                     
         # 4. Scope Master
@@ -1694,8 +1751,15 @@ def handle_rollover_outage(data):
 
             if "ActuatorValve" in wb.sheetnames:
                 ws_act = wb["ActuatorValve"]
+                wo_col = get_header_col_index(ws_act, "No_WO")
                 for row in ws_act.iter_rows(min_row=2):
                     if row[0].value or row[2].value:
+                        if wo_col:
+                            old_wo = str(ws_act.cell(row[0].row, wo_col).value or "").strip()
+                            if old_wo:
+                                new_wo, _, _ = get_remapped_info(old_wo)
+                                if new_wo != old_wo:
+                                    ws_act.cell(row[0].row, wo_col, value=new_wo)
                         if reset_actuators:
                             row[6].value = "SCHED-OK"
                             row[7].value = 0
@@ -1711,8 +1775,15 @@ def handle_rollover_outage(data):
 
             if "Instrument_PressureTX" in wb.sheetnames:
                 ws_ptx = wb["Instrument_PressureTX"]
+                wo_col = get_header_col_index(ws_ptx, "No_WO")
                 for row in ws_ptx.iter_rows(min_row=2):
                     if row[0].value or row[3].value:
+                        if wo_col:
+                            old_wo = str(ws_ptx.cell(row[0].row, wo_col).value or "").strip()
+                            if old_wo:
+                                new_wo, _, _ = get_remapped_info(old_wo)
+                                if new_wo != old_wo:
+                                    ws_ptx.cell(row[0].row, wo_col, value=new_wo)
                         if reset_instruments:
                             row[6].value = None
                             row[7].value = False
@@ -1725,8 +1796,15 @@ def handle_rollover_outage(data):
 
             if "Instrument_TemperatureTX" in wb.sheetnames:
                 ws_ttx = wb["Instrument_TemperatureTX"]
+                wo_col = get_header_col_index(ws_ttx, "No_WO")
                 for row in ws_ttx.iter_rows(min_row=2):
                     if row[0].value or row[3].value:
+                        if wo_col:
+                            old_wo = str(ws_ttx.cell(row[0].row, wo_col).value or "").strip()
+                            if old_wo:
+                                new_wo, _, _ = get_remapped_info(old_wo)
+                                if new_wo != old_wo:
+                                    ws_ttx.cell(row[0].row, wo_col, value=new_wo)
                         if reset_instruments:
                             row[6].value = None
                             row[7].value = False
@@ -1739,8 +1817,15 @@ def handle_rollover_outage(data):
 
             if "Instrument_PressureSwitch" in wb.sheetnames:
                 ws_psw = wb["Instrument_PressureSwitch"]
+                wo_col = get_header_col_index(ws_psw, "No_WO")
                 for row in ws_psw.iter_rows(min_row=2):
                     if row[0].value or row[3].value:
+                        if wo_col:
+                            old_wo = str(ws_psw.cell(row[0].row, wo_col).value or "").strip()
+                            if old_wo:
+                                new_wo, _, _ = get_remapped_info(old_wo)
+                                if new_wo != old_wo:
+                                    ws_psw.cell(row[0].row, wo_col, value=new_wo)
                         if reset_instruments:
                             row[8].value = None
                             row[9].value = None
@@ -1861,6 +1946,7 @@ def save_actuator_update(data):
         wb = openpyxl.load_workbook(path)
         if "ActuatorValve" in wb.sheetnames:
             ws = wb["ActuatorValve"]
+            wo_col = get_header_col_index(ws, "No_WO")
             for row in ws.iter_rows(min_row=2):
                 row_eq = str(row[0].value).strip() if row[0].value else ""
                 row_desc = str(row[2].value).strip() if row[2].value else ""
@@ -1873,6 +1959,8 @@ def save_actuator_update(data):
                     if "temuan" in data: row[12].value = data["temuan"]
                     if "tindak_lanjut" in data: row[13].value = data["tindak_lanjut"]
                     if "jumlah_foto" in data: row[14].value = data["jumlah_foto"]
+                    if "no_wo" in data and wo_col:
+                        ws.cell(row=row[0].row, column=wo_col, value=str(data["no_wo"]).strip())
                     
                     g_done = bool(row[9].value)
                     f_done = bool(row[10].value)
@@ -1914,11 +2002,14 @@ def save_instrument_update(data):
         sname = sheet_name_map.get(inst_type)
         if sname and sname in wb.sheetnames:
             ws = wb[sname]
+            wo_col = get_header_col_index(ws, "No_WO")
             for row in ws.iter_rows(min_row=2):
                 row_kks = str(row[3].value).strip() if row[3].value else ""
                 row_no = str(row[0].value).strip() if row[0].value else ""
                 if (kks and row_kks == str(kks)) or (no and row_no == str(no)):
                     today_str = datetime.date.today().strftime("%d/%m/%Y")
+                    if "no_wo" in data and wo_col:
+                        ws.cell(row=row[0].row, column=wo_col, value=str(data["no_wo"]).strip())
                     if inst_type in ["pressure_tx", "temperature_tx", "ptx", "ttx"]:
                         is_verif = bool(data.get("verifikasi")) if "verifikasi" in data else bool(data.get("status_wdone"))
                         row[7].value = is_verif
@@ -2010,6 +2101,7 @@ def save_edit_details(data):
 
             if "ActuatorValve" in wb.sheetnames:
                 ws = wb["ActuatorValve"]
+                wo_col = get_header_col_index(ws, "No_WO")
                 for row in ws.iter_rows(min_row=2):
                     row_eq = str(row[0].value).strip() if row[0].value else ""
                     if row_eq == identifier:
@@ -2017,6 +2109,8 @@ def save_edit_details(data):
                         if new_area: row[1].value = new_area
                         if new_eq_desc: row[2].value = new_eq_desc
                         if new_kks or new_kks == "": row[3].value = new_kks
+                        if "new_no_wo" in data and wo_col:
+                            ws.cell(row=row[0].row, column=wo_col, value=str(data["new_no_wo"]).strip())
                         break
 
         elif item_type == "instrument":
@@ -2035,6 +2129,7 @@ def save_edit_details(data):
 
             if sheet_name in wb.sheetnames:
                 ws = wb[sheet_name]
+                wo_col = get_header_col_index(ws, "No_WO")
                 for row in ws.iter_rows(min_row=2):
                     row_kks = str(row[3].value).strip() if row[3].value else ""
                     row_no = str(row[0].value).strip() if row[0].value else ""
@@ -2042,6 +2137,8 @@ def save_edit_details(data):
                         if new_area: row[1].value = new_area
                         if new_equipment: row[2].value = new_equipment
                         if new_kks or new_kks == "": row[3].value = new_kks
+                        if "new_no_wo" in data and wo_col:
+                            ws.cell(row=row[0].row, column=wo_col, value=str(data["new_no_wo"]).strip())
                         if new_range and inst_type in ("pressure_tx", "temperature_tx"):
                             row[5].value = new_range
                         if inst_type in ("pressure_switch", "psw"):
@@ -2856,6 +2953,70 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         .badge-INPROGRESS, .badge-IN_PROGRESS, .badge-IN-PROGRESS { background: rgba(245, 158, 11, 0.15); color: var(--status-inprog); border: 1px solid rgba(245, 158, 11, 0.3); }
         .badge-SCHED-OK, .badge-SCHED_OK { background: rgba(100, 116, 139, 0.15); color: var(--status-sched); border: 1px solid rgba(100, 116, 139, 0.3); }
         .badge-findings { background: rgba(244, 63, 94, 0.15); color: var(--status-alert); border: 1px solid rgba(244, 63, 94, 0.3); }
+
+        /* Work Order Linked Badges */
+        .wo-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.74rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .wo-badge.clickable {
+            background: rgba(59, 130, 246, 0.14);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.35);
+            cursor: pointer;
+        }
+        .wo-badge.clickable:hover {
+            background: rgba(59, 130, 246, 0.28);
+            border-color: #60a5fa;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+        }
+        .wo-badge.unlinked {
+            background: rgba(148, 163, 184, 0.1);
+            color: var(--text-muted);
+            border: 1px dashed rgba(148, 163, 184, 0.3);
+            font-size: 0.72rem;
+        }
+        .wo-table-badge {
+            background: rgba(59, 130, 246, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #60a5fa;
+            border-radius: 6px;
+            padding: 2px 7px;
+            font-size: 0.75rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            text-decoration: none;
+        }
+        .wo-table-badge:hover {
+            background: rgba(59, 130, 246, 0.25);
+            border-color: #60a5fa;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(59, 130, 246, 0.2);
+        }
+
+        @keyframes highlightPulse {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.8); border-color: #3b82f6; }
+            50% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); border-color: #60a5fa; }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+        .highlight-pulse {
+            animation: highlightPulse 1.2s ease-in-out 2 !important;
+            border-color: #3b82f6 !important;
+        }
 
         .progress-box { display: flex; align-items: center; gap: 8px; min-width: 140px; justify-content: flex-end; }
         .progress-bar-bg { width: 85px; height: 8px; background: var(--bg-sub); border-radius: 4px; overflow: hidden; display: inline-block; border: 1px solid var(--border-color); }
@@ -4839,6 +5000,41 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             renderTabContent();
         }
 
+        function navigateToWO(noWo) {
+            if(!noWo) return;
+            switchTab('wo');
+            const searchInput = document.getElementById('search-input');
+            if(searchInput) {
+                searchInput.value = noWo;
+            }
+            const statusFilter = document.getElementById('filter-status');
+            if(statusFilter) statusFilter.value = '';
+            const picFilter = document.getElementById('filter-pic');
+            if(picFilter) picFilter.value = '';
+            const areaFilter = document.getElementById('filter-area');
+            if(areaFilter) areaFilter.value = '';
+            quickFilter = 'all';
+            ['all', 'findings', 'inprog', 'finish'].forEach(p => {
+                const el = document.getElementById(`pill-${p}`);
+                if(el) el.classList.toggle('active', p === 'all');
+            });
+            currentPage = 1;
+            applyFilters();
+            
+            const bodyId = getCardBodyId('wo', noWo);
+            openCardIds.add(bodyId);
+            renderTabContent();
+            
+            setTimeout(() => {
+                const card = document.getElementById('card-wo-' + noWo);
+                if(card) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    card.classList.add('highlight-pulse');
+                    setTimeout(() => card.classList.remove('highlight-pulse'), 2800);
+                }
+            }, 120);
+        }
+
         function switchViewMode(mode) {
             currentViewMode = mode;
             document.getElementById('btn-view-cards').classList.toggle('active', mode === 'cards');
@@ -4988,7 +5184,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const code = (item[codeKey] || '').toLowerCase();
             const desc = (item[descKey] || '').toLowerCase();
             const remarks = (item.remarks || '').toLowerCase();
-            const matchSearch = !searchStr || code.includes(searchStr) || desc.includes(searchStr) || remarks.includes(searchStr);
+            const noWo = (item.no_wo || '').toLowerCase();
+            const woDesc = (item.wo_desc || '').toLowerCase();
+            const kks = (item.kks || '').toLowerCase();
+            const matchSearch = !searchStr || code.includes(searchStr) || desc.includes(searchStr) || remarks.includes(searchStr) || noWo.includes(searchStr) || woDesc.includes(searchStr) || kks.includes(searchStr);
             
             const matchStatus = !statusFilter || item[statusKey] === statusFilter;
             const matchPic = !picFilter || item[picKey] === picFilter;
@@ -5324,6 +5523,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 ${(fullData.pics || []).map(p => `<option value="${p}">${p}</option>`).join('')}
                             </select>
                         </div>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Terkait Work Order (WO)</label>
+                            <select id="new-act-wo" class="filter-input">
+                                <option value="">-- Pilih Work Order Terkait --</option>
+                                ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}">${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
+                            </select>
+                        </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
                         <button class="btn-save" onclick="saveNewActuator()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Actuator</button>
@@ -5355,7 +5561,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div class="item-card">
                         <div class="item-header" onclick="toggleAccordion('${bodyId}')">
                             <div class="item-title-box">
-                                <div class="item-code">${item.equipment_id} &bull; ${item.area} ${item.kks ? '&bull; KKS: ' + item.kks : ''} ${item.finish_date ? '&bull; Finished: ' + item.finish_date : ''}</div>
+                                <div class="item-code" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                    <span>${item.equipment_id} &bull; ${item.area}</span>
+                                    ${item.kks ? '<span>&bull; KKS: ' + item.kks + '</span>' : ''}
+                                    ${item.finish_date ? '<span>&bull; Finished: ' + item.finish_date + '</span>' : ''}
+                                    ${item.no_wo ? `
+                                        <span class="wo-badge clickable" onclick="event.stopPropagation(); navigateToWO('${item.no_wo}')" title="${(item.wo_desc || item.no_wo).replace(/"/g, '&quot;')}">
+                                            ${Icons.clipboard || '📋'} ${item.no_wo}
+                                        </span>
+                                    ` : `
+                                        <span class="wo-badge unlinked" title="Belum terikat ke Work Order">
+                                            No WO
+                                        </span>
+                                    `}
+                                </div>
                                 <div class="item-name">${item.equipment_description}</div>
                             </div>
                             <div class="header-actions">
@@ -5387,6 +5606,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </div>
 
                             <div class="form-grid">
+                                <div class="form-group" style="grid-column: span 2;">
+                                    <label>Terkait Work Order (WO)</label>
+                                    <select id="wo-act-${item.equipment_id}" class="filter-input">
+                                        <option value="">-- Tidak Terikat WO --</option>
+                                        ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${item.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
+                                    </select>
+                                </div>
                                 <div class="form-group">
                                     <label>Person in Charge (PIC)</label>
                                     <select id="pic-act-${item.equipment_id}" class="filter-input">
@@ -5397,7 +5623,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <label>Finish Date</label>
                                     <input type="date" id="finish-act-${item.equipment_id}" class="filter-input" value="${formatDateForInput(item.finish_date)}">
                                 </div>
-                                <div class="form-group">
+                                <div class="form-group" style="grid-column: span 2;">
                                     <label>Field Remarks / Notes</label>
                                     <input type="text" id="rem-act-${item.equipment_id}" class="filter-input" value="${item.remarks || ''}" placeholder="Remarks...">
                                 </div>
@@ -5405,7 +5631,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px; flex-wrap:wrap; gap:10px;">
                                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                                    <button type="button" class="btn-edit-details" onclick="openEditDetailsModal('actuator', '${item.equipment_id}', {equipment_id:'${(item.equipment_id||'').replace(/'/g, "\\'")}', equipment_description:'${(item.equipment_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}'})">
+                                    <button type="button" class="btn-edit-details" onclick="openEditDetailsModal('actuator', '${item.equipment_id}', {equipment_id:'${(item.equipment_id||'').replace(/'/g, "\\'")}', equipment_description:'${(item.equipment_description||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}', no_wo:'${(item.no_wo||'').replace(/'/g, "\\'")}'})">
                                         ${Icons.edit} Edit Details
                                     </button>
                                     <button type="button" class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('actuator', '${item.equipment_id}', '${item.equipment_id} - ${item.equipment_description.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}')">
@@ -5429,6 +5655,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <th>Equipment ID</th>
                                 <th>Actuator Description</th>
                                 <th>KKS</th>
+                                <th>Work Order</th>
                                 <th>Area</th>
                                 <th>PIC</th>
                                 <th>General Insp</th>
@@ -5446,6 +5673,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.equipment_id}</td>
                                     <td style="font-weight:600;">${item.equipment_description}</td>
                                     <td><span style="font-size:0.78rem; font-family:'JetBrains Mono'; color:var(--text-muted);">${item.kks || '-'}</span></td>
+                                    <td>
+                                        ${item.no_wo ? `
+                                            <button type="button" class="wo-table-badge" onclick="navigateToWO('${item.no_wo}')" title="${(item.wo_desc || item.no_wo).replace(/"/g, '&quot;')}">
+                                                ${item.no_wo}
+                                            </button>
+                                        ` : '<span style="color:var(--text-muted); font-size:0.8rem;">-</span>'}
+                                    </td>
                                     <td><span style="font-size:0.8rem; color:var(--text-muted);">${item.area}</span></td>
                                     <td style="font-weight:600;">${item.pic || '-'}</td>
                                     <td>
@@ -5539,7 +5773,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const area = (itm.area || '').toLowerCase();
                 const subArea = (itm.sub_area || '').toLowerCase();
                 const setPoint = (itm.set_point || itm.range || '').toLowerCase();
-                const matchSearch = !searchStr || title.includes(searchStr) || kks.includes(searchStr) || area.includes(searchStr) || subArea.includes(searchStr) || setPoint.includes(searchStr);
+                const noWo = (itm.no_wo || '').toLowerCase();
+                const woDesc = (itm.wo_desc || '').toLowerCase();
+                const matchSearch = !searchStr || title.includes(searchStr) || kks.includes(searchStr) || area.includes(searchStr) || subArea.includes(searchStr) || setPoint.includes(searchStr) || noWo.includes(searchStr) || woDesc.includes(searchStr);
                 const matchArea = !areaFilter || itm.area === areaFilter;
                 
                 let matchStatus = true;
@@ -5609,6 +5845,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <option value="NC">NC (Normally Closed)</option>
                             </select>
                         </div>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Terkait Work Order (WO)</label>
+                            <select id="new-inst-wo" class="filter-input">
+                                <option value="">-- Pilih Work Order Terkait --</option>
+                                ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}">${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
+                            </select>
+                        </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
                         <button class="btn-save" onclick="saveNewInstrument()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Instrument</button>
@@ -5657,6 +5900,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                         <span style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || 'No Tag'}</span>
                                         <span>&bull; ${instSubtab === 'psw' ? (item.sub_area || item.area) : item.area}</span>
                                         ${(item.finish_date || item.dated || item.tanggal) ? '<span>&bull; Finished: ' + (item.finish_date || item.dated || item.tanggal) + '</span>' : ''}
+                                        ${item.no_wo ? `
+                                            <span class="wo-badge clickable" onclick="event.stopPropagation(); navigateToWO('${item.no_wo}')" title="${(item.wo_desc || item.no_wo).replace(/"/g, '&quot;')}">
+                                                ${Icons.clipboard || '📋'} ${item.no_wo}
+                                            </span>
+                                        ` : `
+                                            <span class="wo-badge unlinked" title="Belum terikat ke Work Order">
+                                                No WO
+                                            </span>
+                                        `}
                                         ${instSubtab === 'psw' ? `
                                             <div class="setpoint-cell" style="padding:1px 6px; min-width:auto; margin-left:2px;">
                                                 <span class="setpoint-val" style="font-size:0.75rem;">${sp.value}</span>
@@ -5721,13 +5973,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
                             <div class="form-grid">
+                                <div class="form-group" style="grid-column: span 2;">
+                                    <label>Terkait Work Order (WO)</label>
+                                    <select id="wo-inst-${cardPrefix}-${idx}" class="filter-input">
+                                        <option value="">-- Tidak Terikat WO --</option>
+                                        ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${item.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
+                                    </select>
+                                </div>
                                 <div class="form-group">
                                     <label>Calibration Result</label>
                                     <select id="res-psw-${idx}" class="filter-input">
                                         <option value="OK" ${item.status_ok_notok==='OK'?'selected':''}>OK / Within Tolerance</option>
                                         <option value="NOT OK" ${item.status_ok_notok==='NOT OK'?'selected':''}>NOT OK / Deviation</option>
                                     </select>
-                                </div>` : `<div class="form-grid">`}
+                                </div>` : `
+                            <div class="form-grid">
+                                <div class="form-group" style="grid-column: span 2;">
+                                    <label>Terkait Work Order (WO)</label>
+                                    <select id="wo-inst-${cardPrefix}-${idx}" class="filter-input">
+                                        <option value="">-- Tidak Terikat WO --</option>
+                                        ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${item.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
+                                    </select>
+                                </div>`}
                                 <div class="form-group" style="grid-column: span 2;">
                                     <label>Field Remarks / Notes</label>
                                     <input type="text" id="inst-rem-${idx}" class="filter-input" value="${item.remarks || ''}" placeholder="Calibration / verification remarks...">
@@ -5736,7 +6003,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px; border-top:1px solid var(--border-color); padding-top:12px; flex-wrap:wrap; gap:10px;">
                                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                                    <button type="button" class="btn-edit-details" onclick="openEditDetailsModal('instrument', '${item.kks || item.no}', {equipment:'${(title||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', no:'${item.no||''}', description:'${(item.description||'').replace(/'/g, "\\'")}', range:'${(item.range||'').replace(/'/g, "\\'")}', sub_area:'${(item.sub_area||'').replace(/'/g, "\\'")}', set_point:'${(sp?sp.value:'').replace(/'/g, "\\'")}', sp_dir:'${sp?sp.dir:'HIGH'}', contact_type:'${(contact||'NO')}'}, '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
+                                    <button type="button" class="btn-edit-details" onclick="openEditDetailsModal('instrument', '${item.kks || item.no}', {equipment:'${(title||'').replace(/'/g, "\\'")}', kks:'${(item.kks||'').replace(/'/g, "\\'")}', area:'${(item.area||'').replace(/'/g, "\\'")}', no:'${item.no||''}', description:'${(item.description||'').replace(/'/g, "\\'")}', range:'${(item.range||'').replace(/'/g, "\\'")}', sub_area:'${(item.sub_area||'').replace(/'/g, "\\'")}', set_point:'${(sp?sp.value:'').replace(/'/g, "\\'")}', sp_dir:'${sp?sp.dir:'HIGH'}', contact_type:'${(contact||'NO')}', no_wo:'${(item.no_wo||'').replace(/'/g, "\\'")}'}, '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
                                         ${Icons.edit} Edit Details
                                     </button>
                                     <button type="button" class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
@@ -5760,6 +6027,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <tr>
                                     <th>KKS Tag</th>
                                     <th>Equipment Description</th>
+                                    <th>Work Order</th>
                                     <th>Area / Sub-Area</th>
                                     <th style="text-align:center;">Set Point</th>
                                     <th style="text-align:center;">Contact (NO/NC)</th>
@@ -5782,6 +6050,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <tr>
                                         <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || '-'}</td>
                                         <td style="font-weight:600;">${title}</td>
+                                        <td>
+                                            ${item.no_wo ? `
+                                                <button type="button" class="wo-table-badge" onclick="navigateToWO('${item.no_wo}')" title="${(item.wo_desc || item.no_wo).replace(/"/g, '&quot;')}">
+                                                    ${item.no_wo}
+                                                </button>
+                                            ` : '<span style="color:var(--text-muted); font-size:0.8rem;">-</span>'}
+                                        </td>
                                         <td><span style="font-size:0.82rem; font-weight:600; color:var(--text-main);">${areaDisplay}</span></td>
                                         <td style="text-align:center;">
                                             <div class="setpoint-cell">
@@ -5820,6 +6095,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <tr>
                                     <th>KKS Tag</th>
                                     <th>Equipment Description</th>
+                                    <th>Work Order</th>
                                     <th>Area</th>
                                     <th>Range / Units</th>
                                     <th style="text-align:center;">Calibration</th>
@@ -5838,6 +6114,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <tr>
                                         <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || '-'}</td>
                                         <td style="font-weight:600;">${title}</td>
+                                        <td>
+                                            ${item.no_wo ? `
+                                                <button type="button" class="wo-table-badge" onclick="navigateToWO('${item.no_wo}')" title="${(item.wo_desc || item.no_wo).replace(/"/g, '&quot;')}">
+                                                    ${item.no_wo}
+                                                </button>
+                                            ` : '<span style="color:var(--text-muted); font-size:0.8rem;">-</span>'}
+                                        </td>
                                         <td><span style="font-size:0.8rem; color:var(--text-muted);">${item.area}</span></td>
                                         <td><span style="font-size:0.82rem; font-family:'JetBrains Mono';">${item.range || '-'}</span></td>
                                         <td style="text-align:center;">
@@ -6146,6 +6429,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <label>KKS Tag</label>
                         <input type="text" id="edit-det-kks" class="filter-input" value="${currentData.kks || ''}" placeholder="10LAB30AA210">
                     </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Terkait Work Order (WO)</label>
+                        <select id="edit-det-no-wo" class="filter-input">
+                            <option value="">-- Tidak Terikat WO --</option>
+                            ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${currentData.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
+                        </select>
+                    </div>
                 `;
             } else if (itemType === 'instrument') {
                 const title = currentData.equipment || currentData.description || '';
@@ -6164,6 +6454,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div class="form-group">
                         <label>System Area</label>
                         <input type="text" id="edit-det-area" class="filter-input" value="${currentData.area || ''}" placeholder="BOILER, ESP, TURBINE...">
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Terkait Work Order (WO)</label>
+                        <select id="edit-det-no-wo" class="filter-input">
+                            <option value="">-- Tidak Terikat WO --</option>
+                            ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${currentData.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
+                        </select>
                     </div>
                     ${!isPswType ? `<div class="form-group" style="grid-column: span 2;">
                         <label>Transmitter Range</label>
@@ -6241,10 +6538,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 payload.new_equipment_description = (document.getElementById('edit-det-eq-desc') || {}).value || '';
                 payload.new_kks = (document.getElementById('edit-det-kks') || {}).value || '';
                 payload.new_area = (document.getElementById('edit-det-area') || {}).value || '';
+                payload.new_no_wo = (document.getElementById('edit-det-no-wo') || {}).value || '';
             } else if (itemType === 'instrument') {
                 payload.new_equipment = (document.getElementById('edit-det-equipment') || {}).value || '';
                 payload.new_kks = (document.getElementById('edit-det-kks') || {}).value || '';
                 payload.new_area = (document.getElementById('edit-det-area') || {}).value || '';
+                payload.new_no_wo = (document.getElementById('edit-det-no-wo') || {}).value || '';
                 const rangeEl = document.getElementById('edit-det-range');
                 if (rangeEl) payload.new_range = rangeEl.value || '';
                 const subAreaEl = document.getElementById('edit-det-subarea');
@@ -7051,10 +7350,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:120px;">Equipment ID</th>
-                            <th style="width:110px;">KKS Tag</th>
+                            <th style="width:115px;">Equipment ID</th>
+                            <th style="width:100px;">KKS Tag</th>
                             <th>Actuator Valve Description</th>
-                            <th style="width:85px;">Area</th>
+                            <th style="width:110px;">Work Order</th>
+                            <th style="width:80px;">Area</th>
                             <th style="width:75px; text-align:center;">General Insp</th>
                             <th style="width:75px; text-align:center;">Function Test</th>
                             <th style="width:65px; text-align:center;">% Prog</th>
@@ -7075,6 +7375,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                         <div style="font-size:0.75rem; color:#fda4af; font-weight:normal; margin-top:2px;">Finding: ${a.temuan || 'Photo logged'}</div>
                                     ` : ''}
                                 </td>
+                                <td style="font-family:'JetBrains Mono'; font-size:0.75rem; color:#f59e0b; font-weight:600;">${a.no_wo || '-'}</td>
                                 <td><span style="font-size:0.8rem; color:var(--text-muted);">${a.area || 'BOILER'}</span></td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${a.general_inspection ? 'var(--status-finish)' : 'var(--text-muted)'};">
                                     ${a.general_inspection ? 'OK' : 'Pending'}
@@ -7154,9 +7455,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:130px;">KKS Tag</th>
+                            <th style="width:120px;">KKS Tag</th>
                             <th>Equipment Description</th>
-                            <th style="width:120px;">Range / Unit</th>
+                            <th style="width:110px;">Work Order</th>
+                            <th style="width:110px;">Range / Unit</th>
                             <th style="width:90px; text-align:center;">Calibration</th>
                             <th style="width:105px; text-align:center;">Verification (Done)</th>
                             <th style="width:95px; text-align:center;">Status</th>
@@ -7172,6 +7474,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <td style="text-align:center; font-family:'JetBrains Mono';">${idx + 1}</td>
                                 <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks}</td>
                                 <td style="font-weight:600;">${item.equipment}</td>
+                                <td style="font-family:'JetBrains Mono'; font-size:0.75rem; color:#f59e0b; font-weight:600;">${item.no_wo || '-'}</td>
                                 <td style="font-size:0.8rem; color:var(--text-muted);">${item.range || '-'} ${item.eng_unit || ''}</td>
                                 <td style="text-align:center; font-size:0.8rem; font-weight:700; color:${isCalib ? '#38bdf8' : 'var(--text-muted)'};">
                                     ${isCalib ? 'Done' : 'Pending'}
@@ -7198,9 +7501,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:130px;">KKS Tag</th>
+                            <th style="width:120px;">KKS Tag</th>
                             <th>Equipment Description</th>
-                            <th style="width:120px;">Range / Unit</th>
+                            <th style="width:110px;">Work Order</th>
+                            <th style="width:110px;">Range / Unit</th>
                             <th style="width:90px; text-align:center;">Calibration</th>
                             <th style="width:105px; text-align:center;">Verification (Done)</th>
                             <th style="width:95px; text-align:center;">Status</th>
@@ -7242,9 +7546,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <thead>
                         <tr>
                             <th style="width:30px;">No</th>
-                            <th style="width:125px;">KKS Tag</th>
+                            <th style="width:115px;">KKS Tag</th>
                             <th>Description</th>
-                            <th style="width:105px;">Sub-Area</th>
+                            <th style="width:110px;">Work Order</th>
+                            <th style="width:95px;">Sub-Area</th>
                             <th style="width:100px; text-align:center;">Set Point</th>
                             <th style="width:75px; text-align:center;">Contact</th>
                             <th style="width:85px; text-align:center;">Calibration</th>
@@ -7264,6 +7569,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 <td style="text-align:center; font-family:'JetBrains Mono';">${idx + 1}</td>
                                 <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks}</td>
                                 <td style="font-weight:600;">${item.description}</td>
+                                <td style="font-family:'JetBrains Mono'; font-size:0.75rem; color:#f59e0b; font-weight:600;">${item.no_wo || '-'}</td>
                                 <td style="font-size:0.8rem; color:var(--text-muted);">${item.sub_area || item.area || '-'}</td>
                                 <td style="text-align:center;">
                                     <div class="setpoint-cell" style="padding:1px 5px; min-width:auto;">
@@ -7593,10 +7899,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const isAllDone = isGen && isFunc;
             const autoFinishDate = isAllDone ? getTodayFormatted() : '';
 
+            const woSelect = document.getElementById(`wo-act-${eqId}`);
             const payload = {
                 unit: currentUnit,
                 equipment_id: eqId,
                 equipment_description: desc,
+                no_wo: woSelect ? woSelect.value : '',
                 pic: document.getElementById(`pic-act-${eqId}`).value,
                 finish_date: autoFinishDate,
                 remarks: document.getElementById(`rem-act-${eqId}`).value,
@@ -7623,11 +7931,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const verifChk = document.getElementById(`inst-verif-${idx}`);
             const remInput = document.getElementById(`inst-rem-${idx}`);
             
+            const woSelect = document.getElementById(`wo-inst-inst-${idx}`);
             const payload = {
                 unit: currentUnit,
                 type: type === 'ptx' ? 'pressure_tx' : 'temperature_tx',
                 kks: key,
                 no: key,
+                no_wo: woSelect ? woSelect.value : '',
                 kalibrasi: calibChk ? calibChk.checked : false,
                 verifikasi: verifChk ? verifChk.checked : false,
                 remarks: remInput ? remInput.value : ''
@@ -7661,11 +7971,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const verifChk = document.getElementById(`inst-verif-${idx}`);
             const remInput = document.getElementById(`inst-rem-${idx}`);
 
+            const woSelect = document.getElementById(`wo-inst-psw-${idx}`);
             const payload = {
                 unit: currentUnit,
                 type: 'pressure_switch',
                 kks: key,
                 no: key,
+                no_wo: woSelect ? woSelect.value : '',
                 asfound_set: document.getElementById(`af-set-${idx}`) ? document.getElementById(`af-set-${idx}`).value : '',
                 asfound_reset: document.getElementById(`af-reset-${idx}`) ? document.getElementById(`af-reset-${idx}`).value : '',
                 asleft_set: document.getElementById(`al-set-${idx}`) ? document.getElementById(`al-set-${idx}`).value : '',
@@ -7843,11 +8155,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 return;
             }
 
+            const noWo = (document.getElementById('new-act-wo')?.value || '').trim();
             try {
                 const res = await fetch('/api/add_actuator', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({unit: currentUnit, equipment_id: eqId, equipment_description: desc, area: area, kks: kks, pic: pic})
+                    body: JSON.stringify({unit: currentUnit, equipment_id: eqId, equipment_description: desc, area: area, kks: kks, pic: pic, no_wo: noWo})
                 });
                 const result = await res.json();
                 if(result.status === 'success') {
@@ -7856,6 +8169,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     document.getElementById('new-act-desc').value = '';
                     document.getElementById('new-act-area').value = '';
                     document.getElementById('new-act-kks').value = '';
+                    if(document.getElementById('new-act-wo')) document.getElementById('new-act-wo').value = '';
                     toggleAccordion('add-act-form');
                     loadData();
                 } else {
@@ -7917,7 +8231,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         sub_area: subArea || area,
                         range: range || spCombined,
                         set_point: spCombined || range,
-                        contact_type: contact
+                        contact_type: contact,
+                        no_wo: (document.getElementById('new-inst-wo')?.value || '').trim()
                     })
                 });
                 const result = await res.json();
@@ -7929,6 +8244,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     if(document.getElementById('new-inst-subarea')) document.getElementById('new-inst-subarea').value = '';
                     if(document.getElementById('new-inst-range')) document.getElementById('new-inst-range').value = '';
                     if(document.getElementById('new-inst-sp-val')) document.getElementById('new-inst-sp-val').value = '';
+                    if(document.getElementById('new-inst-wo')) document.getElementById('new-inst-wo').value = '';
                     toggleAccordion('add-inst-form');
                     loadData();
                 } else {

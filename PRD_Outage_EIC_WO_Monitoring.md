@@ -4,9 +4,9 @@
 
 | Document Metric | Specification |
 | :--- | :--- |
-| **Document Version** | **2.2 (Annual Outage Rollover & Campaign Setup Release)** |
+| **Document Version** | **2.3 (Work Order Linkage on Actuators & Instruments Release)** |
 | **Author / Lead** | M. Farhan Tandia (EIC & IT Supervisor) & EIC Team PLTU MSW |
-| **Last Updated** | **September 2, 2026** |
+| **Last Updated** | **September 11, 2026** |
 | **Status** | **Approved & Active in Production** |
 | **Runtime Target** | Standalone Windows Executable (`server.exe`) & Python 3.8+ (Localhost / LAN) |
 
@@ -131,10 +131,10 @@ Each master workbook contains **8 standardized sheets**:
 | :--- | :--- | :--- |
 | **`WorkOrder`** | Primary WO records | `No`, `No_WO`, `Unit`, `Job_Description`, `Area`, `Schedule_Date`, `Actual_Start_Date`, `Finish_Date`, `Status`, `PIC`, `N_Task`, `Progress_Percent`, `Scope`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
 | **`WorkOrder_Checklist`** | Technical subtask checklists | `No_WO`, `Sub_Task_Description`, `Date`, `PIC_Task`, `Done_TRUE_FALSE`, `Findings`, `Action_Taken`, `Photo_Count` |
-| **`ActuatorValve`** | Motorized actuator valve matrix | `Equipment_ID`, `Area`, `Equipment_Description`, `KKS`, `Unit`, `PIC`, `Status`, `Progress_Percent`, `Finish_Date`, `General_Inspection_TRUE_FALSE`, `Function_Test_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
-| **`Instrument_PressureTX`** | Pressure transmitter calibrations | `No`, `Area`, `Equipment`, `KKS`, `Unit`, `Range`, `Date`, `Finish_Date`, `Done_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
-| **`Instrument_TemperatureTX`** | Temperature transmitter calibrations | `No`, `Area`, `Equipment`, `KKS`, `Unit`, `Range`, `Date`, `Finish_Date`, `Done_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
-| **`Instrument_PressureSwitch`** | Pressure switch set point testing | `No`, `Area`, `Description`, `KKS`, `Unit`, `Sub_Area`, `Set_Point`, `Contact_Type_NO_NC`, `AsFound_Set`, `AsFound_Reset`, `AsLeft_Set`, `AsLeft_Reset`, `Status_OK_NotOK`, `Done_TRUE_FALSE`, `Date`, `Finish_Date`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count` |
+| **`ActuatorValve`** | Motorized actuator valve matrix | `Equipment_ID`, `Area`, `Equipment_Description`, `KKS`, `Unit`, `PIC`, `Status`, `Progress_Percent`, `Finish_Date`, `General_Inspection_TRUE_FALSE`, `Function_Test_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count`, `No_WO` |
+| **`Instrument_PressureTX`** | Pressure transmitter calibrations | `No`, `Area`, `Equipment`, `KKS`, `Unit`, `Range`, `Date`, `Finish_Date`, `Done_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count`, `No_WO` |
+| **`Instrument_TemperatureTX`** | Temperature transmitter calibrations | `No`, `Area`, `Equipment`, `KKS`, `Unit`, `Range`, `Date`, `Finish_Date`, `Done_TRUE_FALSE`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count`, `No_WO` |
+| **`Instrument_PressureSwitch`** | Pressure switch set point testing | `No`, `Area`, `Description`, `KKS`, `Unit`, `Sub_Area`, `Set_Point`, `Contact_Type_NO_NC`, `AsFound_Set`, `AsFound_Reset`, `AsLeft_Set`, `AsLeft_Reset`, `Status_OK_NotOK`, `Done_TRUE_FALSE`, `Date`, `Finish_Date`, `Remarks`, `Findings`, `Action_Taken`, `Photo_Count`, `No_WO` |
 | **`PIC_Scope_Master`** | Job scope & PIC mapping | `Category`, `Equipment_Scope_Name`, `Scope_Type_Vendor_MSW`, `Work_Scope_ME_SI_SE`, `Activity_Description`, `PIC`, `Unit` |
 | **`Dashboard_Summary`** | Automated formula calculations & Outage Schedule | Formula-based summary (`COUNTIFS`) computing progress percentages & Section 5 storing official Outage Start Date and Outage Finish Date |
 
@@ -159,6 +159,13 @@ Each master workbook contains **8 standardized sheets**:
 ### 6.3. Smart Cross-Component Two-Way Synchronization
 - **FR-3.1 KKS Tag Normalization:** Intelligent matching engine reconciling prefix variations (`10` vs `20`) and technical synonyms (`DRAUGHT` &harr; `DRAFT`, `ID FAN` &harr; `INDUCED DRAUGHT FAN`).
 - **FR-3.2 Bidirectional Propagations:** Checking a valve/instrument subtask in a Work Order automatically advances the corresponding component in `ActuatorValve` or `Instrument_*` sheet to **FINISH (100%)**, and vice-versa.
+- **FR-3.3 Dedicated Work Order (WO) Linkage:** Each Actuator Valve and Field Instrument (PTX, TTX, PSW) contains an explicit `No_WO` binding. Users can view, assign, or reassign WOs via:
+  1. Inline Card Body dropdown (`Terkait Work Order (WO)`).
+  2. Edit Details modal (`openEditDetailsModal`).
+  3. Add New Actuator & Add New Instrument creation forms.
+- **FR-3.4 Clickable Quick Navigation (`navigateToWO`):** Clicking a Work Order badge on any Actuator or Instrument card/table row instantly navigates to the Work Orders tab, applies the search filter, expands the target WO accordion, and highlights the card with a smooth pulse animation.
+- **FR-3.5 Work Order Columns in Official Reports:** Standardized PDF reports (Option 3 Actuator Report, Option 4 Instruments Report) and Table Views include dedicated Work Order columns.
+- **FR-3.6 Rollover Cascade Integrity:** The Annual Outage Rollover wizard automatically cascades new Work Order remappings to `ActuatorValve` and all `Instrument_*` sheets.
 
 ### 6.4. Master EIC Security & Authorization
 - **FR-4.1 Default Protected State:** Master PIC personnel and Job Scope definitions are locked by default to prevent unauthorized modification.
@@ -226,6 +233,14 @@ The interface adheres to modern enterprise SaaS standards:
 ---
 
 ## 9. Complete Changelog & Evolution History
+
+### 🔹 Version 2.3 (September 11, 2026) — *Work Order Linkage on Actuators & Instruments Release*
+- **Explicit `No_WO` Excel Column Architecture:** Added dedicated `No_WO` column across all Master Excel sheets (`ActuatorValve`, `Instrument_PressureTX`, `Instrument_TemperatureTX`, `Instrument_PressureSwitch`) in Unit 1 and Unit 2.
+- **Initial Automated Migration & Alignment:** Successfully matched and populated 100% of existing components (93/93 Unit 1 actuators, 92/92 Unit 2 actuators, 88 PTX, 32 TTX, 30 PSW) to their corresponding Work Orders (`WO-100826-xxxx` and `WO-180726-xxxx`).
+- **Interactive Quick-Navigation (`navigateToWO`):** Clicking any Work Order badge on an actuator or instrument card/table row instantly jumps to the Work Orders tab, applies the search filter, expands the accordion, and applies a prominent pulse glow highlight (`.highlight-pulse`).
+- **Inline Card Body & Modal Reassignment:** Added clean dropdown selects (`Terkait Work Order (WO)`) in Actuator/Instrument card bodies, `openEditDetailsModal` modal, and `Add New Actuator` / `Add New Instrument` forms.
+- **Table Views & Official Print Reports Integration:** Dedicated `Work Order` columns added to Actuator Table View, Instrument Table Views, Option 3 (Full Actuator Valves Monitoring Report), and Option 4 (Comprehensive Field Instruments Report).
+- **Rollover Cascade Continuity:** Extended the Annual Outage Rollover wizard to automatically update and cascade new Work Order mappings to `ActuatorValve` and all `Instrument_*` sheets.
 
 ### 🔹 Version 2.2 (September 2, 2026) — *Annual Outage Rollover & Progress Reset Wizard*
 - **Password-Protected Outage Rollover Wizard:** Added a dedicated modal wizard accessible via the header `Rollover` button, guarded by Master EIC Password authentication.
