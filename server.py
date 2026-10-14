@@ -2739,6 +2739,16 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(LOGIN_PAGE_HTML.encode('utf-8'))
             return
 
+        elif path in ["/logout", "/api/logout"]:
+            sess = get_session_from_handler(self)
+            if sess and sess.get("token") in ACTIVE_SESSIONS:
+                invalidate_user_session(sess.get("token"))
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.send_header("Set-Cookie", "eic_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; SameSite=Lax")
+            self.end_headers()
+            return
+
         elif path == "/api/auth/me":
             sess = get_session_from_handler(self)
             self.send_response(200)
@@ -6883,7 +6893,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             localStorage.removeItem('eic_user');
             document.cookie = "eic_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; SameSite=Lax;";
             document.cookie = "eic_session=; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;";
-            window.location.reload();
+            window.location.href = '/login';
         }
 
         function checkRolePermission(allowedRoles, actionName) {
