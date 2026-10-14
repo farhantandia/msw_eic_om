@@ -1,0 +1,26 @@
+{
+    "admin": {
+        "password": "CHANGE_ME_ADMIN_PASSWORD",
+        "role": "all",
+        "name": "Administrator EIC",
+        "badge_color": "#10b981"
+    },
+    "gen_user": {
+        "password": "CHANGE_ME_GEN_PASSWORD",
+        "role": "general",
+        "name": "General Operator",
+        "badge_color": "#8b5cf6"
+    },
+    "act_user": {
+        "password": "CHANGE_ME_ACT_PASSWORD",
+        "role": "actuator",
+        "name": "Actuator Operator",
+        "badge_color": "#f59e0b"
+    },
+    "inst_user": {
+        "password": "CHANGE_ME_INST_PASSWORD",
+        "role": "instrument",
+        "name": "Instrument Operator",
+        "badge_color": "#0ea5e9"
+    }
+}

@@ -11,18 +11,78 @@ import datetime
 import base64
 import io
 import openpyxl
+import uuid
+import secrets
+import zipfile
+
 import difflib
 import re
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-PORT = 8000
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+AUTH_USERS_FILE = os.path.join(BASE_DIR, "auth_users.json")
+AUTH_EXAMPLE_FILE = os.path.join(BASE_DIR, "auth_users.example.json")
+SESSIONS_FILE = os.path.join(BASE_DIR, "active_sessions.json")
+CALIBRATION_DIR = os.path.join(BASE_DIR, "Calibration")
+ARCHIVE_DIR = os.path.join(BASE_DIR, "Archive")
+SESSION_RETENTION_SECONDS = 2 * 24 * 3600  # 48 Hours
+
+def load_env_vars():
+    """Lightweight zero-dependency .env loader for custom configuration"""
+    env_path = os.path.join(BASE_DIR, ".env")
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+        except Exception:
+            pass
+
+load_env_vars()
+
+PORT = int(os.environ.get("PORT", 8000))
 FILE_LOCK = threading.Lock()
+
+def get_auth_users():
+    """Dynamically loads credentials from auth_users.json without hardcoding passwords in source code."""
+    if not os.path.exists(AUTH_USERS_FILE):
+        if os.path.exists(AUTH_EXAMPLE_FILE):
+            try:
+                shutil.copyfile(AUTH_EXAMPLE_FILE, AUTH_USERS_FILE)
+                print(f"[AUTH] Created {AUTH_USERS_FILE} from example template.")
+            except Exception as e:
+                print(f"[AUTH] Could not initialize {AUTH_USERS_FILE}: {e}")
+    try:
+        if os.path.exists(AUTH_USERS_FILE):
+            with open(AUTH_USERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[AUTH] Error reading {AUTH_USERS_FILE}: {e}")
+    return {}
+
+def is_valid_master_password(password):
+    """Verifies authorization against admin credentials in auth_users.json or MASTER_PASSWORD environment variable."""
+    if not password:
+        return False
+    users = get_auth_users()
+    admin_pwd = users.get("admin", {}).get("password", "")
+    if admin_pwd and password == admin_pwd:
+        return True
+    env_master = os.environ.get("MASTER_PASSWORD", "")
+    if env_master and password == env_master:
+        return True
+    extra_masters = users.get("_master_passwords", [])
+    if isinstance(extra_masters, list) and password in extra_masters:
+        return True
+    return False
 
 def safe_save_workbook(wb, path):
     try:
@@ -1175,6 +1235,7 @@ def load_unit_data(unit):
                     is_calib = bool(r[12]) if len(r) > 12 and r[12] is not None else is_verif
                     no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
                     wo_desc = wo_map.get(no_wo_val, {}).get("job_description", "") if no_wo_val else ""
+                    calib_docs = get_instrument_calibration_files(unit, "pressure_tx", clean_val(r[3]), clean_val(r[0]))
                     ptx_list.append({
                         "no": clean_val(r[0]),
                         "area": clean_val(r[1]) or "GENERAL",
@@ -1191,7 +1252,9 @@ def load_unit_data(unit):
                         "tindak_lanjut": clean_val(r[10]),
                         "jumlah_foto": clean_val(r[11]) or 0,
                         "no_wo": no_wo_val,
-                        "wo_desc": wo_desc
+                        "wo_desc": wo_desc,
+                        "calibration_files": calib_docs,
+                        "calibration_count": len(calib_docs)
                     })
                     
         ttx_list = []
@@ -1205,6 +1268,7 @@ def load_unit_data(unit):
                     is_calib = bool(r[12]) if len(r) > 12 and r[12] is not None else is_verif
                     no_wo_val = clean_val(r[wo_idx]) if wo_idx is not None and len(r) > wo_idx else ""
                     wo_desc = wo_map.get(no_wo_val, {}).get("job_description", "") if no_wo_val else ""
+                    calib_docs = get_instrument_calibration_files(unit, "temperature_tx", clean_val(r[3]), clean_val(r[0]))
                     ttx_list.append({
                         "no": clean_val(r[0]),
                         "area": clean_val(r[1]) or "BOILER",
@@ -1221,7 +1285,9 @@ def load_unit_data(unit):
                         "tindak_lanjut": clean_val(r[10]),
                         "jumlah_foto": clean_val(r[11]) or 0,
                         "no_wo": no_wo_val,
-                        "wo_desc": wo_desc
+                        "wo_desc": wo_desc,
+                        "calibration_files": calib_docs,
+                        "calibration_count": len(calib_docs)
                     })
                     
         psw_list = []
@@ -1450,8 +1516,6 @@ def save_outage_dates_update(data):
         "finish_date": finish_date
     }
 
-VALID_MASTER_PASSWORDS = ["eic123", "admin123", "msweic", "123456", "eic2026", "admin@msw"]
-
 def generate_wo_mapping_excel(unit):
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     path = get_excel_path(unit)
@@ -1504,7 +1568,7 @@ def generate_wo_mapping_excel(unit):
     )
 
     ws_new.cell(row=1, column=1, value=f"EIC OUTAGE WORK ORDER MAPPING TEMPLATE — UNIT {unit}").font = font_title
-    ws_new.cell(row=2, column=1, value="Panduan: Isi kolom 'New_No_WO' dengan nomor WO baru dari CMMS (SAP/Maximo). Kolom lain sebagai referensi. Simpan dan unggah kembali di Web UI.").font = font_instruction
+    ws_new.cell(row=2, column=1, value="Panduan: Isi kolom 'New_No_WO' dengan nomor WO baru dari CMMS (SAP/Maximo). Kolom lain sebagai referensi. Save dan unggah kembali di Web UI.").font = font_instruction
 
     headers = [
         ("No", 8, "center", fill_hdr),
@@ -1574,7 +1638,7 @@ def generate_wo_mapping_excel(unit):
 
 def handle_rollover_outage(data):
     password = str(data.get("password", "")).strip()
-    if not password or password.lower() not in VALID_MASTER_PASSWORDS:
+    if not is_valid_master_password(password):
         return {"status": "error", "message": "Master Authorization Password invalid! Access denied."}
 
     units_input = data.get("units", [1])
@@ -2404,12 +2468,376 @@ def handle_finding_photo_delete(data):
         "photos": [{"filename": p, "url": f"/findings_media/{rel_folder}/{p}"} for p in sorted(photo_files)]
     }
 
+
+# ---------------- AUTHENTICATION & ACCESS CONTROL ----------------
+# (Credentials are dynamically loaded from auth_users.json without hardcoded passwords in source code)
+
+def load_active_sessions():
+    if os.path.exists(SESSIONS_FILE):
+        try:
+            with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                now = datetime.datetime.now().timestamp()
+                valid = {k: v for k, v in data.items() if v.get("expires_at", 0) > now}
+                return valid
+        except Exception:
+            return {}
+    return {}
+
+def save_active_sessions(sessions):
+    try:
+        with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, indent=2)
+    except Exception as e:
+        print(f"Warning: could not save active_sessions.json: {e}")
+
+ACTIVE_SESSIONS = load_active_sessions()
+
+def create_user_session(username, user_info):
+    token = secrets.token_hex(24)
+    now = datetime.datetime.now().timestamp()
+    expires_at = now + SESSION_RETENTION_SECONDS
+    session_data = {
+        "token": token,
+        "username": username,
+        "role": user_info.get("role", "guest"),
+        "name": user_info.get("name", username),
+        "badge_color": user_info.get("badge_color", "#6366f1"),
+        "created_at": now,
+        "expires_at": expires_at
+    }
+    ACTIVE_SESSIONS[token] = session_data
+    save_active_sessions(ACTIVE_SESSIONS)
+    return session_data
+
+def invalidate_user_session(token):
+    if token in ACTIVE_SESSIONS:
+        del ACTIVE_SESSIONS[token]
+        save_active_sessions(ACTIVE_SESSIONS)
+
+def get_session_from_handler(handler):
+    token = None
+    auth_header = handler.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.replace("Bearer ", "").strip()
+    
+    if not token:
+        cookie_header = handler.headers.get("Cookie", "")
+        for item in cookie_header.split(";"):
+            parts = item.strip().split("=")
+            if len(parts) == 2 and parts[0] == "eic_session":
+                token = parts[1]
+                break
+    
+    if not token or token not in ACTIVE_SESSIONS:
+        return None
+    
+    session = ACTIVE_SESSIONS[token]
+    if session.get("expires_at", 0) < datetime.datetime.now().timestamp():
+        invalidate_user_session(token)
+        return None
+        
+    return session
+
+# ---------------- CALIBRATION DOCUMENT STORAGE ----------------
+def resolve_calibration_folder(unit, inst_type, kks, no=None):
+    clean_kks = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', str(kks or no or 'ITEM')).strip('_')
+    clean_type = "PTX" if ("pressure_tx" in str(inst_type).lower() or str(inst_type).lower() == "ptx") else (
+        "TTX" if ("temperature_tx" in str(inst_type).lower() or str(inst_type).lower() == "ttx") else "PSW"
+    )
+    folder = os.path.join(CALIBRATION_DIR, f"UNIT {unit}", clean_type, clean_kks)
+    return folder, clean_type, clean_kks
+
+def get_instrument_calibration_files(unit, inst_type, kks, no=None):
+    folder, clean_type, clean_kks = resolve_calibration_folder(unit, inst_type, kks, no)
+    if not os.path.exists(folder):
+        return []
+    files = []
+    try:
+        for f in sorted(os.listdir(folder)):
+            fpath = os.path.join(folder, f)
+            if os.path.isfile(fpath):
+                stat = os.stat(fpath)
+                dt_str = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m/%Y %H:%M")
+                rel_path = f"UNIT {unit}/{clean_type}/{clean_kks}/{f}"
+                ext = os.path.splitext(f)[1].lower()
+                file_type = "pdf" if ext == ".pdf" else ("excel" if ext in [".xlsx", ".xls"] else "image")
+                files.append({
+                    "filename": f,
+                    "size_bytes": stat.st_size,
+                    "size_formatted": f"{stat.st_size/1024:.1f} KB" if stat.st_size < 1024*1024 else f"{stat.st_size/(1024*1024):.1f} MB",
+                    "upload_date": dt_str,
+                    "file_type": file_type,
+                    "url": f"/calibration_media/{urllib.parse.quote(rel_path)}"
+                })
+    except Exception as e:
+        print(f"Error scanning calibration folder {folder}: {e}")
+    return files
+
+def handle_calibration_file_upload(data):
+    unit = int(data.get("unit", 1))
+    inst_type = str(data.get("type", "pressure_tx"))
+    kks = str(data.get("kks", "")).strip()
+    no = str(data.get("no", "")).strip()
+    filename = str(data.get("filename", "")).strip()
+    file_b64 = data.get("file_base64", "")
+
+    if not filename or not file_b64:
+        return {"status": "error", "message": "Filename and file content (base64) are required."}
+
+    folder, clean_type, clean_kks = resolve_calibration_folder(unit, inst_type, kks, no)
+    os.makedirs(folder, exist_ok=True)
+
+    safe_fn = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', filename)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    root, ext = os.path.splitext(safe_fn)
+    dest_name = f"{root}_{ts}{ext}"
+    dest_path = os.path.join(folder, dest_name)
+
+    try:
+        if "," in file_b64:
+            file_b64 = file_b64.split(",", 1)[1]
+        raw_bytes = base64.b64decode(file_b64)
+        with open(dest_path, "wb") as f:
+            f.write(raw_bytes)
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to save calibration file: {str(e)}"}
+
+    files = get_instrument_calibration_files(unit, inst_type, kks, no)
+    return {
+        "status": "success",
+        "message": f"Calibration document '{filename}' uploaded successfully!",
+        "files": files,
+        "count": len(files)
+    }
+
+def handle_calibration_file_delete(data):
+    unit = int(data.get("unit", 1))
+    inst_type = str(data.get("type", "pressure_tx"))
+    kks = str(data.get("kks", "")).strip()
+    no = str(data.get("no", "")).strip()
+    filename = str(data.get("filename", "")).strip()
+
+    folder, clean_type, clean_kks = resolve_calibration_folder(unit, inst_type, kks, no)
+    target_path = os.path.join(folder, os.path.basename(filename))
+    if os.path.exists(target_path) and os.path.isfile(target_path):
+        try:
+            os.remove(target_path)
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to delete file: {str(e)}"}
+
+    files = get_instrument_calibration_files(unit, inst_type, kks, no)
+    return {
+        "status": "success",
+        "message": "Calibration document deleted successfully.",
+        "files": files,
+        "count": len(files)
+    }
+
+# ---------------- ARCHIVE MANAGEMENT ----------------
+def get_archive_list():
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    items = []
+    for name in os.listdir(ARCHIVE_DIR):
+        folder_path = os.path.join(ARCHIVE_DIR, name)
+        if os.path.isdir(folder_path):
+            stat = os.stat(folder_path)
+            u1_excel = os.path.join(folder_path, "Template_Outage_EIC_Monitoring_unit 1.xlsx")
+            u2_excel = os.path.join(folder_path, "Template_Outage_EIC_Monitoring_unit 2.xlsx")
+            
+            u1_exists = os.path.exists(u1_excel)
+            u2_exists = os.path.exists(u2_excel)
+            if not u1_exists:
+                for f in os.listdir(folder_path):
+                    if "unit 1" in f.lower() and f.endswith(".xlsx"):
+                        u1_excel = os.path.join(folder_path, f)
+                        u1_exists = True
+                        break
+            if not u2_exists:
+                for f in os.listdir(folder_path):
+                    if "unit 2" in f.lower() and f.endswith(".xlsx"):
+                        u2_excel = os.path.join(folder_path, f)
+                        u2_exists = True
+                        break
+
+            total_size = 0
+            photo_count = 0
+            for r_dir, _, f_names in os.walk(folder_path):
+                for fn in f_names:
+                    fp = os.path.join(r_dir, fn)
+                    try:
+                        total_size += os.path.getsize(fp)
+                    except Exception:
+                        pass
+                    if fn.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                        photo_count += 1
+
+            dt_created = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m/%Y %H:%M:%S")
+
+            items.append({
+                "folder_name": name,
+                "label": name.replace("_", " "),
+                "created_at": dt_created,
+                "mtime": stat.st_mtime,
+                "total_size": total_size,
+                "total_size_formatted": f"{total_size/1024:.1f} KB" if total_size < 1024*1024 else f"{total_size/(1024*1024):.1f} MB",
+                "has_unit1": u1_exists,
+                "unit1_size": os.path.getsize(u1_excel) if u1_exists else 0,
+                "unit1_filename": os.path.basename(u1_excel) if u1_exists else "",
+                "has_unit2": u2_exists,
+                "unit2_size": os.path.getsize(u2_excel) if u2_exists else 0,
+                "unit2_filename": os.path.basename(u2_excel) if u2_exists else "",
+                "photo_count": photo_count
+            })
+    
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return items
+
+def create_archive_snapshot(data):
+    raw_label = str(data.get("label", "Manual_Snapshot")).strip()
+    clean_label = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_label).strip('_') or "Manual_Snapshot"
+    timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder_name = f"{clean_label}_{timestamp_str}"
+    target_folder = os.path.join(ARCHIVE_DIR, folder_name)
+
+    with FILE_LOCK:
+        try:
+            os.makedirs(target_folder, exist_ok=True)
+            copied = []
+            for u in [1, 2]:
+                p = get_excel_path(u)
+                if os.path.exists(p):
+                    dest_p = os.path.join(target_folder, os.path.basename(p))
+                    shutil.copy2(p, dest_p)
+                    copied.append(os.path.basename(p))
+
+            finding_dir = os.path.join(BASE_DIR, "Finding")
+            if os.path.exists(finding_dir):
+                shutil.copytree(finding_dir, os.path.join(target_folder, "Finding"), dirs_exist_ok=True)
+
+            return {
+                "status": "success",
+                "message": f"Archive snapshot '{folder_name}' created successfully!",
+                "folder_name": folder_name,
+                "copied_files": copied
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to create archive snapshot: {str(e)}"}
+
 class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
         
+        
+        if path == "/login":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(LOGIN_PAGE_HTML.encode('utf-8'))
+            return
+
+        elif path == "/api/auth/me":
+            sess = get_session_from_handler(self)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            if sess:
+                self.wfile.write(json.dumps({"authenticated": True, "user": sess}, ensure_ascii=False).encode('utf-8'))
+            else:
+                self.wfile.write(json.dumps({"authenticated": False, "role": "guest"}, ensure_ascii=False).encode('utf-8'))
+            return
+
+        elif path == "/api/archive_list":
+            sess = get_session_from_handler(self)
+            if not sess or sess.get("role") != "all":
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "Akses Dibatasi: Khusus role All Feature (Admin)."}).encode('utf-8'))
+                return
+            archives = get_archive_list()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success", "archives": archives}, ensure_ascii=False).encode('utf-8'))
+            return
+
+        elif path == "/api/download_archive_file":
+            sess = get_session_from_handler(self)
+            if not sess or sess.get("role") != "all":
+                self.send_response(403)
+                self.end_headers()
+                return
+            folder = query.get("folder", [""])[0]
+            filename = query.get("file", [""])[0]
+            target_path = os.path.join(ARCHIVE_DIR, os.path.basename(folder), os.path.basename(filename))
+            if os.path.exists(target_path) and os.path.isfile(target_path):
+                with open(target_path, "rb") as f:
+                    f_bytes = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(target_path)}"')
+                self.send_header("Content-Length", str(len(f_bytes)))
+                self.end_headers()
+                self.wfile.write(f_bytes)
+                return
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        elif path == "/api/download_archive_zip":
+            sess = get_session_from_handler(self)
+            if not sess or sess.get("role") != "all":
+                self.send_response(403)
+                self.end_headers()
+                return
+            folder = query.get("folder", [""])[0]
+            target_folder = os.path.join(ARCHIVE_DIR, os.path.basename(folder))
+            if os.path.exists(target_folder) and os.path.isdir(target_folder):
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                    for root, _, files in os.walk(target_folder):
+                        for file in files:
+                            full_p = os.path.join(root, file)
+                            rel_p = os.path.relpath(full_p, target_folder)
+                            zip_file.write(full_p, rel_p)
+                zip_bytes = zip_buffer.getvalue()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(target_folder)}.zip"')
+                self.send_header("Content-Length", str(len(zip_bytes)))
+                self.end_headers()
+                self.wfile.write(zip_bytes)
+                return
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        elif path.startswith("/calibration_media/"):
+            rel_path = path.replace("/calibration_media/", "")
+            full_path = os.path.join(BASE_DIR, "Calibration", urllib.parse.unquote(rel_path))
+            if os.path.exists(full_path) and os.path.isfile(full_path):
+                mime, _ = mimetypes.guess_type(full_path)
+                if not mime:
+                    if full_path.lower().endswith(".xlsx"):
+                        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    elif full_path.lower().endswith(".pdf"):
+                        mime = "application/pdf"
+                    else:
+                        mime = "application/octet-stream"
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Disposition", f'inline; filename="{os.path.basename(full_path)}"')
+                self.end_headers()
+                with open(full_path, "rb") as f:
+                    self.wfile.write(f.read())
+                return
+
         if path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2533,7 +2961,135 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             body = {}
 
+        
+        # Public auth endpoints
+        if parsed.path == "/api/auth/login":
+            u = str(body.get("username", "")).strip()
+            p = str(body.get("password", "")).strip()
+            users = get_auth_users()
+            if u in users and users[u].get("password") == p:
+                sess = create_user_session(u, users[u])
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Set-Cookie", f"eic_session={sess['token']}; Path=/; Max-Age=172800; SameSite=Lax")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "success", "token": sess["token"], "user": sess}, ensure_ascii=False).encode('utf-8'))
+                return
+            else:
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "Invalid username or password."}).encode('utf-8'))
+                return
+
+        elif parsed.path == "/api/auth/logout":
+            token = body.get("token")
+            if token and token in ACTIVE_SESSIONS:
+                invalidate_user_session(token)
+            sess = get_session_from_handler(self)
+            if sess and sess.get("token") in ACTIVE_SESSIONS:
+                invalidate_user_session(sess.get("token"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Set-Cookie", "eic_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; SameSite=Lax")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success", "message": "Signed out successfully."}).encode('utf-8'))
+            return
+
+        elif parsed.path == "/api/verify_master_password":
+            pwd = str(body.get("password", "")).strip()
+            if is_valid_master_password(pwd):
+                res = {"status": "success", "message": "Master authorization verified."}
+            else:
+                res = {"status": "error", "message": "Invalid master password. Access denied."}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+            return
+
+        # RBAC Permission Checking
+        ROLE_RULES = {
+            "/api/update_instrument": ["instrument", "transmitter", "general", "all", "admin"],
+            "/api/quick_toggle_instrument": ["instrument", "transmitter", "general", "all", "admin"],
+            "/api/bulk_update_instruments": ["instrument", "transmitter", "general", "all", "admin"],
+            "/api/add_instrument": ["instrument", "transmitter", "general", "all", "admin"],
+            "/api/delete_instrument": ["instrument", "transmitter", "general", "all", "admin"],
+            "/api/upload_calibration_file": ["instrument", "transmitter", "general", "all", "admin"],
+            "/api/delete_calibration_file": ["instrument", "transmitter", "general", "all", "admin"],
+            "/api/update_actuator": ["actuator", "general", "all", "admin"],
+            "/api/quick_toggle_actuator": ["actuator", "general", "all", "admin"],
+            "/api/add_actuator": ["actuator", "general", "all", "admin"],
+            "/api/delete_actuator": ["actuator", "general", "all", "admin"],
+            "/api/update_wo": ["general", "all", "admin"],
+            "/api/quick_toggle_subtask": ["general", "all", "admin"],
+            "/api/batch_toggle_subtasks": ["general", "all", "admin"],
+            "/api/add_wo": ["general", "all", "admin"],
+            "/api/delete_wo": ["general", "all", "admin"],
+            "/api/add_subtask": ["general", "all", "admin"],
+            "/api/delete_subtask": ["general", "all", "admin"],
+            "/api/update_outage_dates": ["all", "admin"],
+            "/api/add_pic": ["all", "admin"],
+            "/api/delete_pic": ["all", "admin"],
+            "/api/update_scope": ["all", "admin"],
+            "/api/delete_scope": ["all", "admin"],
+            "/api/add_scope": ["all", "admin"],
+            "/api/rollover_outage": ["all", "admin"],
+            "/api/create_archive_snapshot": ["all", "admin"],
+        }
+
+        if parsed.path in ROLE_RULES:
+            sess = get_session_from_handler(self)
+            allowed = ROLE_RULES[parsed.path]
+            if not sess:
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": f"Authentication required ({allowed}). Please sign in.", "code": "AUTH_REQUIRED"}).encode('utf-8'))
+                return
+            u_role = sess.get("role", "")
+            if u_role != "all" and u_role != "admin" and u_role not in allowed:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": f"Access Denied: Requires role {allowed}. Current role: '{u_role}'.", "code": "ROLE_DENIED"}).encode('utf-8'))
+                return
+
+        # Granular checks for edit_details and upload_finding_photo
+        if parsed.path in ["/api/edit_details", "/api/upload_finding_photo", "/api/delete_finding_photo"]:
+            sess = get_session_from_handler(self)
+            item_type = str(body.get("type", "") or body.get("item_type", "")).lower()
+            if not sess:
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "Please sign in to update records.", "code": "AUTH_REQUIRED"}).encode('utf-8'))
+                return
+            u_role = sess.get("role", "")
+            if u_role not in ["all", "admin"]:
+                if item_type == "instrument" and u_role not in ["instrument", "transmitter", "general"]:
+                    self.send_response(403)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Instrument, General, or Admin role required."}).encode('utf-8'))
+                    return
+                elif item_type == "actuator" and u_role not in ["actuator", "general"]:
+                    self.send_response(403)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Actuator, General, or Admin role required."}).encode('utf-8'))
+                    return
+                elif item_type == "wo" and u_role != "general":
+                    self.send_response(403)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "General or Administrator role required."}).encode('utf-8'))
+                    return
+
         routes = {
+            "/api/upload_calibration_file": handle_calibration_file_upload,
+            "/api/delete_calibration_file": handle_calibration_file_delete,
+            "/api/create_archive_snapshot": create_archive_snapshot,
             "/api/update_outage_dates": save_outage_dates_update,
             "/api/update_wo": save_wo_update,
             "/api/quick_toggle_subtask": save_quick_subtask_toggle,
@@ -2577,6 +3133,575 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
 
         self.send_response(404)
         self.end_headers()
+
+LOGIN_PAGE_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Sign In - PLTU MSW EIC Outage System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <script>
+        (function() {
+            const saved = localStorage.getItem('eic_theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', saved);
+        })();
+    </script>
+    <style>
+        :root {
+            --bg-body: #030712;
+            --bg-card: rgba(15, 23, 42, 0.75);
+            --bg-card-hover: rgba(30, 41, 59, 0.85);
+            --border-color: rgba(56, 189, 248, 0.18);
+            --border-hover: rgba(56, 189, 248, 0.45);
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.35);
+            --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+            --accent-green: #10b981;
+            --accent-amber: #f59e0b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-sub: #64748b;
+            --input-bg: rgba(11, 19, 41, 0.85);
+            --radius-md: 10px;
+            --radius-lg: 18px;
+        }
+
+        [data-theme="light"] {
+            --bg-body: #f8fafc;
+            --bg-card: rgba(255, 255, 255, 0.92);
+            --bg-card-hover: #ffffff;
+            --border-color: rgba(2, 132, 199, 0.22);
+            --border-hover: rgba(2, 132, 199, 0.5);
+            --primary: #0284c7;
+            --primary-glow: rgba(2, 132, 199, 0.2);
+            --primary-gradient: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+            --accent-green: #059669;
+            --accent-amber: #d97706;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-sub: #64748b;
+            --input-bg: #ffffff;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            position: relative;
+            overflow-x: hidden;
+            transition: background-color 0.25s, color 0.25s;
+        }
+
+        /* Ambient Lighting */
+        .ambient-mesh {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 15%, rgba(56, 189, 248, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 80% 85%, rgba(99, 102, 241, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.05) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .bg-grid {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-size: 36px 36px;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+            pointer-events: none;
+            z-index: 0;
+        }
+        [data-theme="light"] .bg-grid {
+            background-image: 
+                linear-gradient(to right, rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+        }
+
+        .login-wrapper {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 440px;
+        }
+
+        /* Theme Toggle */
+        .theme-btn-top {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 20;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(12px);
+            transition: all 0.2s ease;
+        }
+        .theme-btn-top:hover {
+            transform: scale(1.06);
+            border-color: var(--primary);
+        }
+
+        /* Glass Login Card */
+        .login-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(28px);
+            -webkit-backdrop-filter: blur(28px);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 40px 36px;
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.65), 0 0 35px -5px var(--primary-glow);
+            position: relative;
+            overflow: hidden;
+            animation: cardFadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes cardFadeIn {
+            from { opacity: 0; transform: translateY(16px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .login-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #10b981 100%);
+        }
+
+        /* Brand Header */
+        .brand-header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .brand-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(56, 189, 248, 0.1);
+            color: var(--primary);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-size: 0.76rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            margin-bottom: 14px;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+        }
+
+        .brand-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.025em;
+            margin-bottom: 6px;
+        }
+
+        .brand-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .session-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-green);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            margin-top: 10px;
+        }
+
+        /* Error Box */
+        .login-error {
+            display: none;
+            background: rgba(244, 63, 94, 0.12);
+            border: 1px solid rgba(244, 63, 94, 0.35);
+            color: #f43f5e;
+            padding: 11px 14px;
+            border-radius: var(--radius-md);
+            font-size: 0.82rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            animation: shake 0.35s ease;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-6px); }
+            40%, 80% { transform: translateX(6px); }
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 18px;
+            text-align: left;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 7px;
+            letter-spacing: 0.02em;
+        }
+
+        .input-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 14px;
+            color: var(--text-sub);
+            width: 17px;
+            height: 17px;
+            pointer-events: none;
+        }
+
+        .login-input {
+            width: 100%;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px 14px 12px 42px;
+            font-size: 0.92rem;
+            color: var(--text-main);
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .login-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+
+        .pwd-toggle-btn {
+            position: absolute;
+            right: 12px;
+            background: transparent;
+            border: none;
+            color: var(--text-sub);
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .pwd-toggle-btn:hover { color: var(--text-main); }
+
+        /* Submit Button */
+        .btn-submit {
+            width: 100%;
+            background: var(--primary-gradient);
+            color: #ffffff;
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 13px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 4px 16px rgba(2, 132, 199, 0.4);
+            margin-top: 24px;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 22px rgba(2, 132, 199, 0.55);
+        }
+
+        .btn-submit:active { transform: translateY(0); }
+        .btn-submit:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
+
+        /* Role Quick Select Keycards */
+        .role-hints-box {
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .role-hints-title {
+            font-size: 0.72rem;
+            font-weight: 800;
+            color: var(--text-sub);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .role-pills {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+
+        .role-card-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .role-card-btn:hover {
+            border-color: var(--primary);
+            background: var(--bg-card-hover);
+            transform: translateY(-1px);
+        }
+
+        .role-card-btn.active {
+            border-color: var(--primary);
+            box-shadow: 0 0 12px var(--primary-glow);
+        }
+
+        .role-title {
+            font-size: 0.74rem;
+            font-weight: 800;
+            color: var(--text-main);
+            display: block;
+        }
+
+        .role-user {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            margin-top: 3px;
+            display: block;
+        }
+
+        /* Guest Link */
+        .back-link-box {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .back-link {
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: var(--primary); }
+
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="ambient-mesh"></div>
+    <div class="bg-grid"></div>
+
+    <button class="theme-btn-top" onclick="toggleTheme()" title="Toggle Theme">
+        <span id="theme-icon"></span>
+    </button>
+
+    <div class="login-wrapper">
+        <div class="login-card">
+            <div class="brand-header">
+                <div class="brand-badge">
+                    <svg style="width:13px; height:13px;" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    PLTU MSW &bull; EIC
+                </div>
+                <h1 class="brand-title">Sign In</h1>
+                <p class="brand-subtitle">Outage Work Order Monitoring System</p>
+                <div class="session-badge">
+                    <span style="width:6px; height:6px; border-radius:50%; background:var(--accent-green);"></span>
+                    48-Hour Session Active
+                </div>
+            </div>
+
+            <div id="login-error-box" class="login-error"></div>
+
+            <form id="login-form" onsubmit="handleLoginSubmit(event)">
+                <div class="form-group">
+                    <label class="form-label" for="login-username">Username</label>
+                    <div class="input-box">
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                        <input type="text" id="login-username" class="login-input" placeholder="Enter username" required autofocus autocomplete="username">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="login-password">Password</label>
+                    <div class="input-box">
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        <input type="password" id="login-password" class="login-input" placeholder="Enter password" required autocomplete="current-password">
+                        <button type="button" class="pwd-toggle-btn" onclick="togglePasswordVisibility()" title="Show/Hide Password">
+                            <svg id="eye-icon" style="width:18px; height:18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" id="btn-login-submit" class="btn-submit">
+                    <svg style="width:18px; height:18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+                    <span>Sign In</span>
+                </button>
+            </form>
+
+            <div class="role-hints-box">
+                <div class="role-hints-title">Quick Select Operator Role</div>
+                <div class="role-pills" style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                    <div class="role-card-btn" onclick="fillUsername('gen_user', this)">
+                        <span class="role-title" style="color:#a855f7;">General</span>
+                        <span class="role-user">WO, Act & Inst</span>
+                    </div>
+                    <div class="role-card-btn" onclick="fillUsername('act_user', this)">
+                        <span class="role-title" style="color:var(--accent-amber);">Actuator</span>
+                        <span class="role-user">Valves Only</span>
+                    </div>
+                    <div class="role-card-btn" onclick="fillUsername('inst_user', this)">
+                        <span class="role-title" style="color:var(--primary);">Instrument</span>
+                        <span class="role-user">Instruments Only</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="back-link-box">
+                <a href="/" class="back-link">
+                    Continue as Guest &rarr;
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('eic_theme', next);
+            updateThemeIcon(next);
+        }
+
+        function updateThemeIcon(theme) {
+            const icon = document.getElementById('theme-icon');
+            if (!icon) return;
+            if (theme === 'dark') {
+                icon.innerHTML = '<svg style="width:20px; height:20px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
+            } else {
+                icon.innerHTML = '<svg style="width:20px; height:20px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+            }
+        }
+
+        function togglePasswordVisibility() {
+            const input = document.getElementById('login-password');
+            const icon = document.getElementById('eye-icon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+            } else {
+                input.type = 'password';
+                icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
+            }
+        }
+
+        function fillUsername(u, btnEl) {
+            document.querySelectorAll('.role-card-btn').forEach(b => b.classList.remove('active'));
+            if (btnEl) btnEl.classList.add('active');
+            const uInput = document.getElementById('login-username');
+            const pInput = document.getElementById('login-password');
+            if (uInput) uInput.value = u;
+            if (pInput) {
+                pInput.value = '';
+                pInput.focus();
+            }
+            const errBox = document.getElementById('login-error-box');
+            if (errBox) errBox.style.display = 'none';
+        }
+
+        async function handleLoginSubmit(e) {
+            e.preventDefault();
+            const u = document.getElementById('login-username').value.trim();
+            const p = document.getElementById('login-password').value;
+            const btn = document.getElementById('btn-login-submit');
+            const errBox = document.getElementById('login-error-box');
+
+            errBox.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="spin" style="width:18px; height:18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg> <span>Verifying...</span>';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u, password: p })
+                });
+                const data = await res.json();
+                if (data.status === 'success' && data.token) {
+                    localStorage.setItem('eic_session_token', data.token);
+                    localStorage.setItem('eic_user', JSON.stringify(data.user));
+                    window.location.href = '/';
+                } else {
+                    errBox.innerText = data.message || 'Invalid username or password.';
+                    errBox.style.display = 'block';
+                    btn.disabled = false;
+                    btn.innerHTML = '<svg style="width:18px; height:18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> <span>Sign In</span>';
+                }
+            } catch (err) {
+                errBox.innerText = 'Connection error: ' + err.message;
+                errBox.style.display = 'block';
+                btn.disabled = false;
+                btn.innerHTML = '<svg style="width:18px; height:18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> <span>Sign In</span>';
+            }
+        }
+
+        (async function checkExistingAuth() {
+            updateThemeIcon(document.documentElement.getAttribute('data-theme') || 'dark');
+            const token = localStorage.getItem('eic_session_token');
+            if (token) {
+                try {
+                    const res = await fetch('/api/auth/me', {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    const data = await res.json();
+                    if (data.authenticated) {
+                        window.location.href = '/';
+                    }
+                } catch(e) {}
+            }
+        })();
+    </script>
+</body>
+</html>
+"""
 
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="id">
@@ -2738,6 +3863,112 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
         }
         .btn-rollover:hover { background: #f43f5e; color: #fff; box-shadow: 0 4px 12px rgba(244, 63, 94, 0.3); }
+
+        /* Header 3-Dots Action Menu */
+        .header-menu-container {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+        .header-menu-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-sub);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 0;
+        }
+        .header-menu-btn:hover, .header-menu-btn.active {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: var(--bg-card-hover);
+            box-shadow: 0 0 14px var(--primary-glow);
+        }
+        .header-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 250px;
+            background: var(--bg-glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.45);
+            padding: 8px;
+            display: none;
+            flex-direction: column;
+            gap: 4px;
+            z-index: 1000;
+            animation: menuFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .header-dropdown-menu.active {
+            display: flex;
+        }
+        @keyframes menuFadeIn {
+            from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .menu-user-info {
+            padding: 10px 12px;
+            background: var(--bg-sub);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 4px;
+        }
+        .menu-user-name {
+            font-size: 0.84rem;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .menu-user-meta {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .menu-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+        }
+        .menu-item-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 9px 12px;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: var(--text-main);
+            font-size: 0.84rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: left;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }
+        .menu-item-btn:hover {
+            background: var(--bg-card-hover);
+            color: var(--primary);
+        }
+        .menu-item-btn.danger:hover {
+            background: rgba(244, 63, 94, 0.1);
+            color: #f43f5e;
+        }
+    
 
         /* Rollover Wizard Styling */
         .rollover-step-card {
@@ -4154,6 +5385,270 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             gap: 6px;
         }
 
+    
+        /* --- AUTH & ROLE BADGES IN HEADER --- */
+        .user-profile-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+        .guest-mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(100, 116, 139, 0.12);
+            border: 1px solid rgba(100, 116, 139, 0.25);
+            color: var(--text-muted);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .btn-login-header {
+            background: linear-gradient(135deg, var(--primary) 0%, #0284c7 100%);
+            color: #ffffff !important;
+            padding: 6px 14px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.78rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 3px 10px rgba(2, 132, 199, 0.3);
+            transition: all 0.2s ease;
+        }
+        .btn-login-header:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 5px 14px rgba(2, 132, 199, 0.45);
+        }
+        .btn-logout {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 5px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s ease;
+        }
+        .btn-logout:hover {
+            border-color: #f43f5e;
+            color: #f43f5e;
+            background: rgba(244, 63, 94, 0.08);
+        }
+
+        /* --- TRANSMITTER CALIBRATION BUTTONS & CHIPS --- */
+        .btn-calib-doc {
+            background: var(--bg-sub);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 6px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-calib-doc:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: var(--bg-card-hover);
+        }
+        .btn-calib-doc.active {
+            border-color: #0ea5e9;
+            color: #0ea5e9;
+            background: rgba(14, 165, 233, 0.12);
+            font-weight: 700;
+        }
+        .calib-doc-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: rgba(14, 165, 233, 0.12);
+            color: #0ea5e9;
+            border: 1px solid rgba(14, 165, 233, 0.3);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .calib-doc-chip:hover {
+            background: rgba(14, 165, 233, 0.22);
+            transform: scale(1.04);
+        }
+
+        /* --- DATA ARCHIVE STYLES --- */
+        .archive-hero-banner {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 24px 28px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            box-shadow: var(--shadow-card);
+        }
+        [data-theme="light"] .archive-hero-banner {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+        .archive-stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .archive-kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .archive-kpi-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .archive-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+            gap: 18px;
+        }
+        .archive-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            box-shadow: var(--shadow-card);
+            transition: all 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .archive-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 28px -6px rgba(0,0,0,0.3);
+        }
+        .archive-file-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-sub);
+            border: 1px solid var(--border-color);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.76rem;
+            color: var(--text-main);
+        }
+        .btn-archive-dl {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+        .btn-archive-dl:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: var(--bg-card-hover);
+        }
+        .btn-archive-zip {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(56, 189, 248, 0.2) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.4);
+            color: #818cf8;
+            padding: 9px 14px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            width: 100%;
+            margin-top: 14px;
+        }
+        .btn-archive-zip:hover {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.35) 0%, rgba(56, 189, 248, 0.35) 100%);
+            border-color: #818cf8;
+            color: #ffffff;
+            transform: translateY(-1px);
+        }
+
+        /* --- CALIBRATION MODAL FILE LIST --- */
+        .calib-files-container {
+            max-height: 240px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background: var(--bg-sub);
+            padding: 8px;
+            margin: 14px 0;
+        }
+        .calib-file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-radius: 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            margin-bottom: 6px;
+            gap: 10px;
+            transition: all 0.2s;
+        }
+        .calib-file-item:last-child { margin-bottom: 0; }
+        .calib-file-item:hover { border-color: var(--primary); }
+        .calib-dropzone {
+            border: 2px dashed var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            background: var(--bg-card);
+            transition: all 0.2s ease;
+        }
+        .calib-dropzone:hover, .calib-dropzone.dragover {
+            border-color: var(--primary);
+            background: var(--bg-card-hover);
+        }
+
     </style>
 </head>
 <body>
@@ -4161,14 +5656,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div id="sticky-summary-bar" class="sticky-summary-bar">
         <div class="sticky-stats-group">
             <span class="sticky-stat-pill" style="color:var(--primary); font-family:'JetBrains Mono'; font-weight:800;">UNIT <span id="sticky-unit-num">1</span></span>
-            <span class="sticky-stat-pill">Total: <strong style="color:var(--primary);" id="sticky-grand-pct">0%</strong></span>
-            <span class="sticky-stat-pill">WO: <strong id="sticky-wo-pct">0%</strong></span>
-            <span class="sticky-stat-pill">Valves: <strong id="sticky-act-pct">0%</strong></span>
-            <span class="sticky-stat-pill">Inst: <strong id="sticky-inst-pct">0%</strong></span>
+            <span class="sticky-stat-pill" id="sticky-pill-total">Total: <strong style="color:var(--primary);" id="sticky-grand-pct">0%</strong></span>
+            <span class="sticky-stat-pill" id="sticky-pill-wo">WO: <strong id="sticky-wo-pct">0%</strong></span>
+            <span class="sticky-stat-pill" id="sticky-pill-act">Valves: <strong id="sticky-act-pct">0%</strong></span>
+            <span class="sticky-stat-pill" id="sticky-pill-inst">Inst: <strong id="sticky-inst-pct">0%</strong></span>
         </div>
         <div class="sticky-actions-group">
             <button class="sticky-action-btn" onclick="openReportModal()" style="display:inline-flex; align-items:center; gap:5px;">
-                <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Reports & Export
+                <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Reports
             </button>
             <button class="sticky-action-btn" onclick="scrollToTop()" style="display:inline-flex; align-items:center; gap:4px;">
                 <svg class="ui-icon sm" viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg> Top
@@ -4242,7 +5737,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px; border-top:1px solid var(--border-color); padding-top:14px;">
                 <button class="page-btn" onclick="closeFindingModal()">Close</button>
                 <button class="btn-save" onclick="saveFindingModalData()" style="display:inline-flex; align-items:center; gap:6px;">
-                    <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Findings & Photos
+                    <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Findings
                 </button>
             </div>
         </div>
@@ -4273,7 +5768,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div style="display:flex; gap:10px;">
                     <button type="button" class="page-btn" onclick="closeEditDetailsModal()">Cancel</button>
                     <button type="button" class="btn-save" onclick="saveEditDetails()" style="display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save Details
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save
                     </button>
                 </div>
             </div>
@@ -4287,19 +5782,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div>
                     <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;" id="report-modal-title">
                         <svg class="ui-icon lg" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                        Outage EIC Report & Print Center
+                        Outage Reports
                     </h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Select one of 4 official report formats to export and print to PDF (Unit 1 & 2).</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Export or print official outage reports (Unit 1 & 2).</div>
                 </div>
                 <button class="modal-close" onclick="closeReportModal()">&times;</button>
             </div>
 
             <!-- 4 Report Option Selector Tabs -->
             <div class="report-type-selector" style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; flex-shrink:0;">
-                <button class="unit-btn active" id="reptab-harian" onclick="setReportType('harian')">1. Daily Progress & Findings</button>
-                <button class="unit-btn" id="reptab-wo_detail" onclick="setReportType('wo_detail')">2. Full WO & Sub-Tasks</button>
-                <button class="unit-btn" id="reptab-actuator" onclick="setReportType('actuator')">3. Actuator Valves</button>
-                <button class="unit-btn" id="reptab-instruments" onclick="setReportType('instruments')">4. Instruments (TX & PSW)</button>
+                <button class="unit-btn active" id="reptab-harian" onclick="setReportType('harian')">1. Daily Progress</button>
+                <button class="unit-btn" id="reptab-wo_detail" onclick="setReportType('wo_detail')">2. Work Orders</button>
+                <button class="unit-btn" id="reptab-actuator" onclick="setReportType('actuator')">3. Actuators</button>
+                <button class="unit-btn" id="reptab-instruments" onclick="setReportType('instruments')">4. Instruments</button>
             </div>
 
             <!-- Date Range Filter Bar for Harian Report -->
@@ -4308,10 +5803,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <input type="date" id="report-start-date" class="filter-input" style="padding:5px 10px; font-size:0.82rem;">
                 <span style="font-size:0.82rem; color:var(--text-muted);">to</span>
                 <input type="date" id="report-end-date" class="filter-input" style="padding:5px 10px; font-size:0.82rem;">
-                <button class="page-btn" style="padding:5px 12px; font-size:0.8rem;" onclick="generateReportContent()">Apply Filter</button>
+                <button class="page-btn" style="padding:5px 12px; font-size:0.8rem;" onclick="generateReportContent()">Apply</button>
                 <div style="margin-left:auto; display:flex; gap:8px;">
                     <button class="btn-save" style="padding:6px 16px; font-size:0.85rem; display:inline-flex; align-items:center; gap:6px;" onclick="printReportModal()">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print / Export PDF
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Export PDF
                     </button>
                 </div>
             </div>
@@ -4326,19 +5821,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; border-top:1px solid var(--border-color); padding-top:12px; flex-shrink: 0;">
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
                     <button class="page-btn" onclick="openSCurveModal()" style="font-weight:700; display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg> S-Curve & Trends
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg> S-Curve
                     </button>
                     <button class="page-btn" onclick="openWaSummaryModal()" style="font-weight:700; color:#10b981; border-color:rgba(16,185,129,0.4); display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg> WhatsApp Summary
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg> Daily Summary
                     </button>
                     <button class="page-btn" onclick="downloadExcel()" style="color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Excel (.xlsx)
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Excel
                     </button>
                 </div>
                 <div style="display:flex; gap:8px;">
                     <button class="page-btn" onclick="closeReportModal()">Close</button>
                     <button class="btn-save" onclick="printReportModal()" style="display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Print / Export PDF
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Export PDF
                     </button>
                 </div>
             </div>
@@ -4366,7 +5861,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <input type="date" id="scurve-start-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Start Date (Saved directly to Excel)">
                     <span style="font-size:0.8rem; color:var(--text-muted);">to</span>
                     <input type="date" id="scurve-end-date" class="filter-input" style="padding:4px 8px; font-size:0.8rem;" onchange="saveAndRenderSCurve()" title="Outage Target Date (Saved directly to Excel)">
-                    <button class="page-btn" style="padding:4px 12px; font-size:0.8rem; font-weight:700; color:var(--primary); border-color:var(--primary);" onclick="saveAndRenderSCurve()">Save to Excel & Recalculate</button>
+                    <button class="page-btn" style="padding:4px 12px; font-size:0.8rem; font-weight:700; color:var(--primary); border-color:var(--primary);" onclick="saveAndRenderSCurve()">Save & Recalculate</button>
                     <span style="font-size:0.75rem; color:#10b981; display:inline-flex; align-items:center; gap:4px; font-weight:600;" title="Outage dates synchronize directly with Excel Dashboard_Summary">
                         <svg class="ui-icon xs" style="width:12px; height:12px;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
                         Excel Synced
@@ -4384,16 +5879,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- WhatsApp Summary Generator Modal -->
+    <!-- Daily Progress Summary Modal -->
     <div class="modal-overlay" id="wa-modal">
         <div class="modal-content" style="max-width: 680px; max-height: 90vh; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <div>
                     <h3 style="color:#10b981; font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
                         <svg class="ui-icon lg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                        WhatsApp Summary Generator
+                        Daily Progress Summary
                     </h3>
-                    <div style="font-size:0.8rem; color:var(--text-muted);">Structured summary message format formatted for team WhatsApp coordination.</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Formatted daily summary ready to copy for team updates.</div>
                 </div>
                 <button class="modal-close" onclick="closeWaSummaryModal()">&times;</button>
             </div>
@@ -4404,7 +5899,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <button class="page-btn" onclick="closeWaSummaryModal()">Close</button>
                 <div style="display:flex; gap:8px;">
                     <button class="btn-save" onclick="copyWaText()" style="background:#10b981; display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg> Copy to Clipboard
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg> Copy Text
                     </button>
                 </div>
             </div>
@@ -4440,7 +5935,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
                     <button type="button" class="page-btn" onclick="closeMasterPasswordModal()">Cancel</button>
                     <button type="submit" class="btn-save" style="padding:9px 20px; display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> Unlock Edit Access
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> Unlock Access
                     </button>
                 </div>
             </form>
@@ -4476,7 +5971,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
                     <button type="button" class="page-btn" onclick="closeRolloverAuthModal()">Cancel</button>
                     <button type="submit" class="btn-save" style="padding:9px 20px; background:linear-gradient(135deg, #f43f5e, #e11d48); display:inline-flex; align-items:center; gap:6px;">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> Unlock Rollover
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> Unlock
                     </button>
                 </div>
             </form>
@@ -4501,7 +5996,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="rollover-step-card">
                 <div class="rollover-step-header">
                     <span class="step-badge">Step 1</span>
-                    <span>Pilih Unit Sasaran (Target Unit)</span>
+                    <span>Target Unit</span>
                 </div>
                 <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
                     <label style="cursor:pointer; font-weight:600; font-size:0.88rem; display:inline-flex; align-items:center; gap:6px;">
@@ -4511,7 +6006,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <input type="radio" name="rollover-unit-choice" value="2" onchange="handleRolloverUnitChange()"> UNIT 2
                     </label>
                     <label style="cursor:pointer; font-weight:600; font-size:0.88rem; display:inline-flex; align-items:center; gap:6px;">
-                        <input type="radio" name="rollover-unit-choice" value="both" onchange="handleRolloverUnitChange()"> KEDUANYA (UNIT 1 & UNIT 2)
+                        <input type="radio" name="rollover-unit-choice" value="both" onchange="handleRolloverUnitChange()"> BOTH (UNIT 1 & 2)
                     </label>
                 </div>
             </div>
@@ -4520,17 +6015,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="rollover-step-card">
                 <div class="rollover-step-header">
                     <span class="step-badge">Step 2</span>
-                    <span>Download Master Mapping Template (.xlsx)</span>
+                    <span>Download Mapping Template (.xlsx)</span>
                 </div>
                 <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:10px;">
-                    Unduh file Excel mapping untuk melihat seluruh daftar Work Order aktif. Anda dapat mengisi kolom <code>New_No_WO</code> dengan nomor WO baru dari CMMS (SAP/Maximo).
+                    Download active WO list. Enter new CMMS/SAP numbers in the <code>New_No_WO</code> column.
                 </p>
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button type="button" class="page-btn" onclick="downloadWoMapping(1)" style="padding:7px 14px; font-size:0.82rem; display:inline-flex; align-items:center; gap:6px; background:rgba(99,102,241,0.08); border-color:var(--primary); color:var(--primary);">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Unit 1 Mapping (.xlsx)
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Unit 1 Mapping Template
                     </button>
                     <button type="button" class="page-btn" onclick="downloadWoMapping(2)" style="padding:7px 14px; font-size:0.82rem; display:inline-flex; align-items:center; gap:6px; background:rgba(99,102,241,0.08); border-color:var(--primary); color:var(--primary);">
-                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Unit 2 Mapping (.xlsx)
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Unit 2 Mapping Template
                     </button>
                 </div>
             </div>
@@ -4539,28 +6034,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="rollover-step-card">
                 <div class="rollover-step-header">
                     <span class="step-badge">Step 3</span>
-                    <span>Pilih Metode Pemetaan Nomor WO Baru</span>
+                    <span>Mapping Method</span>
                 </div>
                 <div class="rollover-method-toggle">
                     <div class="method-card active" id="card-method-excel" onclick="selectRolloverMethod('excel_upload')">
                         <label style="cursor:pointer; font-weight:700; font-size:0.88rem; display:flex; align-items:center; gap:6px;">
                             <input type="radio" name="rollover-method" value="excel_upload" checked>
-                            <span>Unggah File Excel Mapping</span>
+                            <span>Upload Excel Mapping</span>
                         </label>
-                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Cocok jika nomor WO baru di-generate secara custom atau acak oleh sistem SAP/Maximo.</div>
+                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">For custom or non-sequential CMMS WO numbers.</div>
                     </div>
                     <div class="method-card" id="card-method-prefix" onclick="selectRolloverMethod('prefix_replace')">
                         <label style="cursor:pointer; font-weight:700; font-size:0.88rem; display:flex; align-items:center; gap:6px;">
                             <input type="radio" name="rollover-method" value="prefix_replace">
-                            <span>Ganti Pola Prefix (Quick)</span>
+                            <span>Prefix Pattern (Fast)</span>
                         </label>
-                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Cocok jika nomor WO baru hanya berubah kode tanggal (contoh: <code>WO-100826-</code> &rarr; <code>WO-150827-</code>).</div>
+                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">When only the date or code prefix changes (e.g., <code>WO-100826-</code> &rarr; <code>WO-150827-</code>).</div>
                     </div>
                 </div>
 
                 <!-- Method Detail: File Upload -->
                 <div id="method-detail-excel" style="margin-top:14px;">
-                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:6px;">Pilih File Excel Mapping yang Sudah Diisi (.xlsx):</label>
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:6px;">Upload Completed Excel (.xlsx):</label>
                     <input type="file" id="rollover-file-input" accept=".xlsx" class="filter-input" style="width:100%; padding:8px;" onchange="handleRolloverFileChange(this)">
                     <div id="rollover-file-info" style="font-size:0.78rem; color:#10b981; font-weight:700; margin-top:4px; display:none;"></div>
                 </div>
@@ -4569,11 +6064,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div id="method-detail-prefix" style="margin-top:14px; display:none;">
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
                         <div>
-                            <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Prefix WO Lama:</label>
+                            <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Old WO Prefix:</label>
                             <input type="text" id="rollover-prefix-old" class="filter-input" placeholder="e.g. WO-100826-" style="width:100%; font-family:'JetBrains Mono', monospace;">
                         </div>
                         <div>
-                            <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Prefix WO Baru:</label>
+                            <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">New WO Prefix:</label>
                             <input type="text" id="rollover-prefix-new" class="filter-input" placeholder="e.g. WO-150827-" style="width:100%; font-family:'JetBrains Mono', monospace;">
                         </div>
                     </div>
@@ -4584,22 +6079,22 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="rollover-step-card">
                 <div class="rollover-step-header">
                     <span class="step-badge">Step 4</span>
-                    <span>Jadwal Outage Baru & Label Arsip</span>
+                    <span>New Schedule & Archive</span>
                 </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px;">
                     <div>
-                        <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Outage Start Date (Baru):</label>
+                        <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">New Start Date:</label>
                         <input type="date" id="rollover-start-date" class="filter-input" style="width:100%;">
                     </div>
                     <div>
-                        <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Outage Finish Date (Baru):</label>
+                        <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">New Finish Date:</label>
                         <input type="date" id="rollover-finish-date" class="filter-input" style="width:100%;">
                     </div>
                 </div>
                 <div>
-                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Label Folder Arsip Cadangan:</label>
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-main); display:block; margin-bottom:4px;">Archive Backup Label:</label>
                     <input type="text" id="rollover-archive-label" class="filter-input" value="Outage_2026_Final" style="width:100%;">
-                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">Data saat ini akan otomatis dicadangkan ke <code>Archive/&lt;Label&gt;_&lt;Timestamp&gt;/</code>.</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">Current data is backed up to <code>Archive/&lt;Label&gt;_&lt;Timestamp&gt;/</code>.</div>
                 </div>
             </div>
 
@@ -4607,68 +6102,184 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="rollover-step-card">
                 <div class="rollover-step-header">
                     <span class="step-badge">Step 5</span>
-                    <span>Cakupan Reset Sistem</span>
+                    <span>Reset Scope</span>
                 </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.84rem;">
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                        <input type="checkbox" id="chk-opt-archive" checked disabled> <strong>Auto-Archive (Wajib)</strong>
+                        <input type="checkbox" id="chk-opt-archive" checked disabled> <strong>Auto-Archive (Required)</strong>
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                        <input type="checkbox" id="chk-opt-checklists" checked> Reset Checklists ke 0% (SCHED-OK)
+                        <input type="checkbox" id="chk-opt-checklists" checked> Reset Checklists to 0%
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                        <input type="checkbox" id="chk-opt-actuators" checked> Reset Actuator Valves ke 0%
+                        <input type="checkbox" id="chk-opt-actuators" checked> Reset Actuators to 0%
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                        <input type="checkbox" id="chk-opt-instruments" checked> Reset Seluruh Instrumen ke 0%
+                        <input type="checkbox" id="chk-opt-instruments" checked> Reset Instruments to 0%
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                        <input type="checkbox" id="chk-opt-findings" checked> Bersihkan Temuan & Kuantitas Foto
+                        <input type="checkbox" id="chk-opt-findings" checked> Clear Findings & Photos
                     </label>
                 </div>
 
                 <div class="rollover-danger-banner">
                     <svg class="ui-icon md" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                     <div>
-                        <strong style="color:#f43f5e;">PERHATIAN &bull; OPERASI DESTRUKTIF:</strong>
-                        <div>Tindakan ini akan memperbarui Nomor WO dan mereset seluruh progress sistem ke 0%. Seluruh file database master saat ini dan foto-foto temuan akan secara otomatis dicadangkan terlebih dahulu ke folder <code>Archive/</code>.</div>
+                        <strong style="color:#f43f5e;">WARNING &bull; DESTRUCTIVE ACTION:</strong>
+                        <div>This updates WO numbers and resets progress to 0%. Active workbooks and photos are automatically backed up to <code>Archive/</code>.</div>
                     </div>
                 </div>
             </div>
 
             <!-- Footer Action Buttons -->
             <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px; border-top:1px solid var(--border-color); padding-top:14px;">
-                <button type="button" class="page-btn" onclick="closeRolloverWizard()">Batal</button>
+                <button type="button" class="page-btn" onclick="closeRolloverWizard()">Cancel</button>
                 <button type="button" id="btn-execute-rollover" class="btn-save" onclick="executeRolloverSubmit()" style="padding:10px 24px; background:linear-gradient(135deg, #f43f5e, #dc2626); box-shadow:0 4px 14px rgba(244,63,94,0.35); font-weight:700; display:inline-flex; align-items:center; gap:8px;">
                     <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                    <span>Eksekusi Outage Rollover & Reset Progress</span>
+                    <span>Execute Rollover</span>
                 </button>
             </div>
         </div>
     </div>
 
+    
+    <!-- Calibration Documents Modal -->
+    <div class="modal-overlay" id="calib-doc-modal">
+        <div class="modal-content" style="max-width: 620px;">
+            <div class="modal-header">
+                <div>
+                    <h3 style="display:flex; align-items:center; gap:8px; color:var(--primary); font-size:1.15rem; font-weight:800;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        Calibration Documents
+                    </h3>
+                    <div id="calib-modal-subtitle" style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">KKS Tag: Loading...</div>
+                </div>
+                <button class="modal-close" onclick="closeCalibDocModal()">&times;</button>
+            </div>
+
+            <div class="calib-info-box" style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:12px 16px; margin: 14px 0;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:0.82rem;">
+                    <div><span style="color:var(--text-muted);">Equipment:</span> <strong id="calib-modal-eq" style="color:var(--text-main);">-</strong></div>
+                    <div><span style="color:var(--text-muted);">Area:</span> <strong id="calib-modal-area" style="color:var(--text-main);">-</strong></div>
+                    <div><span style="color:var(--text-muted);">KKS Tag:</span> <strong id="calib-modal-kks" style="font-family:'JetBrains Mono'; color:var(--primary);">-</strong></div>
+                    <div><span style="color:var(--text-muted);">Type:</span> <strong id="calib-modal-type" style="color:var(--text-main);">-</strong></div>
+                </div>
+            </div>
+
+            <div style="font-size:0.84rem; font-weight:700; color:var(--text-main); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                <span>Attached Calibration Files</span>
+                <span id="calib-files-count" style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">0 Files</span>
+            </div>
+
+            <div id="calib-files-list" class="calib-files-container">
+                <!-- Dynamically rendered -->
+            </div>
+
+            <div class="calib-upload-box" id="calib-upload-section" style="margin-top:16px;">
+                <div style="font-size:0.84rem; font-weight:700; color:var(--text-main); margin-bottom:8px;">Upload Calibration File</div>
+                <div class="calib-dropzone" onclick="document.getElementById('calib-file-input').click()">
+                    <input type="file" id="calib-file-input" accept=".pdf,.xlsx,.xls,.jpg,.jpeg,.png" style="display:none;" onchange="handleCalibFileSelected(this)">
+                    <svg class="ui-icon" style="width:36px; height:36px; color:var(--primary); margin:0 auto 10px;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    <div style="font-size:0.86rem; font-weight:700; color:var(--text-main);">Click or drop file here to upload</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Supports PDF, Excel (.xlsx, .xls), and Images (.jpg, .png)</div>
+                </div>
+                <div id="calib-upload-selected-info" style="display:none; margin-top:10px; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); padding:10px 14px; border-radius:var(--radius-sm); align-items:center; justify-content:space-between;">
+                    <div style="font-size:0.82rem; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                        <span>📄</span> <strong id="calib-selected-filename">-</strong>
+                        <span id="calib-selected-filesize" style="color:var(--text-muted); font-size:0.75rem;">(-)</span>
+                    </div>
+                    <button type="button" id="btn-do-calib-upload" class="btn-save" onclick="executeCalibUpload()" style="padding:4px 12px; font-size:0.78rem;">Upload File</button>
+                </div>
+                <div id="calib-upload-msg" style="margin-top:8px; font-size:0.8rem; display:none;"></div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; margin-top:18px; border-top:1px solid var(--border-color); padding-top:14px;">
+                <button type="button" class="page-btn" onclick="closeCalibDocModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- On-Demand Archive Snapshot Modal -->
+    <div class="modal-overlay" id="archive-snapshot-modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <div>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                        Create Archive Snapshot
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Back up Unit 1 & Unit 2 Excel workbooks and finding photos</div>
+                </div>
+                <button class="modal-close" onclick="closeArchiveSnapshotModal()">&times;</button>
+            </div>
+            <form onsubmit="submitArchiveSnapshot(event)" style="margin-top:14px;">
+                <div class="form-group">
+                    <label style="font-size:0.82rem; font-weight:700; color:var(--text-muted); display:block; margin-bottom:6px;">Snapshot Label</label>
+                    <input type="text" id="snapshot-label-input" class="filter-input" placeholder="e.g. Mid_Outage_Check_Final / Pre_Synchron_Inspection" required style="width:100%;">
+                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Current data will be saved to a timestamped archive without modifying active work orders.</div>
+                </div>
+                <div id="snapshot-error-msg" style="color:#f43f5e; font-size:0.8rem; font-weight:700; margin-bottom:10px; display:none;"></div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button type="button" class="page-btn" onclick="closeArchiveSnapshotModal()">Cancel</button>
+                    <button type="submit" id="btn-create-snapshot" class="btn-save" style="display:inline-flex; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                        <span>Create Snapshot</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Auth Permission Required Modal -->
+    <div class="modal-overlay" id="auth-alert-modal">
+        <div class="modal-content" style="max-width: 460px; text-align:center; padding:32px 24px;">
+            <div style="width:64px; height:64px; border-radius:50%; background:rgba(244,63,94,0.12); color:#f43f5e; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+                <svg class="ui-icon" style="width:32px; height:32px;" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            </div>
+            <h3 id="auth-alert-title" style="font-size:1.2rem; font-weight:800; color:var(--text-main); margin-bottom:8px;">Access Restricted</h3>
+            <p id="auth-alert-msg" style="font-size:0.86rem; color:var(--text-muted); line-height:1.5; margin-bottom:24px;">
+                This action requires authentication with an authorized role.
+            </p>
+            <div style="display:flex; justify-content:center; gap:10px;">
+                <button type="button" class="page-btn" onclick="closeAuthAlertModal()">Close</button>
+                <a href="/login" class="btn-save" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+                    Sign In
+                </a>
+            </div>
+        </div>
+    </div>
+
+
     <!-- Header -->
     <header>
         <div class="logo-area">
-            <div class="logo-badge" onclick="window.location.reload()" title="Click to Reload Page" style="display:inline-flex; align-items:center; gap:6px;">
+            <div class="logo-badge" onclick="window.location.reload()" title="Reload Dashboard" style="display:inline-flex; align-items:center; gap:6px;">
                 <svg class="ui-icon sm" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
                 PLTU MSW EIC
             </div>
         </div>
         <div class="title-group">
-            <h1>Outage Work Order Monitoring System</h1>
-            <p>Section Electric, Instrument & Control &bull; Real-Time Dashboard</p>
+            <h1>Outage Work Order Monitoring</h1>
+            <p>Electric, Instrument & Control &bull; PLTU MSW</p>
         </div>
         <div class="header-controls">
-            <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Light / Dark Mode">
+            <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
                 <span id="theme-icon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
             </button>
-            <button class="btn-print" onclick="openReportModal()" title="Open Reports / Export PDF" style="display:inline-flex; align-items:center; gap:6px;">
-                <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg> Reports
-            </button>
-            <button class="btn-rollover" onclick="openRolloverAuthModal()" title="Annual Outage Rollover & Reset" style="display:inline-flex; align-items:center; gap:6px;">
-                <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><polyline points="16 21 21 21 21 16"></polyline></svg> Rollover
-            </button>
+            <div id="header-auth-badge" style="display:inline-flex; align-items:center;"></div>
+            <div class="header-menu-container">
+                <button class="header-menu-btn" id="header-menu-btn" onclick="toggleHeaderMenu(event)" title="Actions & Settings" aria-label="Menu">
+                    <svg style="width:20px; height:20px;" viewBox="0 0 24 24" fill="currentColor">
+                        <circle cx="12" cy="5" r="2"></circle>
+                        <circle cx="12" cy="12" r="2"></circle>
+                        <circle cx="12" cy="19" r="2"></circle>
+                    </svg>
+                </button>
+                <div class="header-dropdown-menu" id="header-dropdown-menu">
+                    <!-- Populated dynamically by updateHeaderAuthUI() -->
+                </div>
+            </div>
         </div>
     </header>
 
@@ -4711,7 +6322,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <aside class="sidebar-stats">
                 <div class="sidebar-section-title">Progress Status</div>
                 <div class="stats-vertical-list">
-                    <div class="stat-card" onclick="switchTab('wo')" title="Click to view Work Orders">
+                    <div class="stat-card" id="side-card-wo" onclick="switchTab('wo')" title="Click to view Work Orders">
                         <div class="stat-title">
                             <span class="stat-title-wrap">
                                 <svg class="ui-icon sm" style="color:var(--primary);" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
@@ -4721,7 +6332,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div class="stat-value"><span id="wo-pct">0%</span> <span style="font-size:0.85rem; color:var(--text-muted);" id="wo-counts">0 / 0</span></div>
                         <div class="stat-sub" id="wo-sub">Finish: 0 | In-Progress: 0</div>
                     </div>
-                    <div class="stat-card finish" onclick="switchTab('actuator')" title="Click to view Actuator Valves">
+                    <div class="stat-card finish" id="side-card-act" onclick="switchTab('actuator')" title="Click to view Actuator Valves">
                         <div class="stat-title">
                             <span class="stat-title-wrap">
                                 <svg class="ui-icon sm" style="color:var(--status-finish);" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
@@ -4731,7 +6342,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div class="stat-value"><span id="act-pct">0%</span> <span style="font-size:0.85rem; color:var(--text-muted);" id="act-counts">0 / 0</span></div>
                         <div class="stat-sub" id="act-sub">Finish: 0 | In-Progress: 0</div>
                     </div>
-                    <div class="stat-card inprog" onclick="switchTab('instrument')" title="Click to view Instruments">
+                    <div class="stat-card inprog" id="side-card-inst" onclick="switchTab('instrument')" title="Click to view Instruments">
                         <div class="stat-title">
                             <span class="stat-title-wrap">
                                 <svg class="ui-icon sm" style="color:var(--status-inprog);" viewBox="0 0 24 24"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>
@@ -4758,28 +6369,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <main class="main-content-panel">
                 <!-- Main Navigation Tabs -->
                 <div class="nav-tabs">
-                    <button class="tab-btn active" onclick="switchTab('wo')" style="display:inline-flex; align-items:center; gap:6px;">
+                    <button class="tab-btn active" id="tab-btn-wo" onclick="switchTab('wo')" style="display:inline-flex; align-items:center; gap:6px;">
                         <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
                         Work Orders <span class="tab-count" id="tab-cnt-wo">0</span>
                     </button>
-                    <button class="tab-btn" onclick="switchTab('actuator')" style="display:inline-flex; align-items:center; gap:6px;">
+                    <button class="tab-btn" id="tab-btn-actuator" onclick="switchTab('actuator')" style="display:inline-flex; align-items:center; gap:6px;">
                         <svg class="ui-icon sm" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
-                        Actuator Valves <span class="tab-count" id="tab-cnt-act">0</span>
+                        Actuators <span class="tab-count" id="tab-cnt-act">0</span>
                     </button>
-                    <button class="tab-btn" onclick="switchTab('instrument')" style="display:inline-flex; align-items:center; gap:6px;">
+                    <button class="tab-btn" id="tab-btn-instrument" onclick="switchTab('instrument')" style="display:inline-flex; align-items:center; gap:6px;">
                         <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>
                         Instruments <span class="tab-count" id="tab-cnt-inst">0</span>
                     </button>
-                    <button class="tab-btn" onclick="switchTab('scope')" style="display:inline-flex; align-items:center; gap:6px;">
+                    <button class="tab-btn" id="tab-btn-scope" onclick="switchTab('scope')" style="display:none; align-items:center; gap:6px;">
                         <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                        Scope & Master EIC
+                        Scope
+                    </button>
+                    <button class="tab-btn" id="tab-btn-archive" onclick="switchTab('archive')" style="display:none; align-items:center; gap:6px;">
+                        <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path><path d="M10 12h4"></path></svg>
+                        Archive
                     </button>
                 </div>
 
                 <!-- Filter & Control Toolbar -->
                 <div class="filter-toolbar">
                     <div class="filter-top-row">
-                        <input type="text" id="search-input" class="filter-input search" placeholder="Search WO, KKS, Equipment, Area, Findings, or PIC..." oninput="applyFilters()">
+                        <input type="text" id="search-input" class="filter-input search" placeholder="Search WO, tag, area, or PIC..." oninput="applyFilters()">
                         <select id="filter-status" class="filter-input" onchange="applyFilters()">
                             <option value="">All Statuses</option>
                             <option value="FINISH">FINISH</option>
@@ -4806,10 +6421,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <!-- Quick Filter Chips & Side Item Counter -->
                     <div class="filter-pills" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                         <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                            <button class="pill-btn active" id="pill-all" onclick="setQuickFilter('all')">All Items</button>
+                            <button class="pill-btn active" id="pill-all" onclick="setQuickFilter('all')">All</button>
                             <button class="pill-btn" id="pill-findings" onclick="setQuickFilter('findings')" style="display:inline-flex; align-items:center; gap:5px;">
                                 <svg class="ui-icon sm" style="color:var(--status-alert);" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                                Active Findings / Photos
+                                Findings
                             </button>
                             <button class="pill-btn" id="pill-inprog" onclick="setQuickFilter('inprog')">In Progress</button>
                             <button class="pill-btn" id="pill-finish" onclick="setQuickFilter('finish')">Completed</button>
@@ -4877,7 +6492,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         let editModeState = {};
         let activeFinding = null;
         let isScopeMasterUnlocked = sessionStorage.getItem('eic_scope_unlocked') === 'true';
-        const MASTER_PASSWORDS = ['eic123', 'admin123', 'msweic', '123456', 'eic2026'];
 
         // Date Helpers for Calendar Pickers
         function formatDateForInput(dateVal) {
@@ -4990,13 +6604,834 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             loadData();
         }
 
+        
+        /* ==========================================================================
+           AUTHENTICATION & ROLE-BASED ACCESS CONTROL (RBAC) LOGIC
+           ========================================================================== */
+        let currentUser = null; // {username, role, name, badge_color, expires_at}
+
+        async function initAuth() {
+            const token = localStorage.getItem('eic_session_token');
+            try {
+                const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+                const res = await fetch('/api/auth/me', { headers });
+                const data = await res.json();
+                if (data.authenticated && data.user) {
+                    currentUser = data.user;
+                    localStorage.setItem('eic_user', JSON.stringify(currentUser));
+                } else {
+                    currentUser = null;
+                    localStorage.removeItem('eic_session_token');
+                    localStorage.removeItem('eic_user');
+                }
+            } catch(e) {
+                const cached = localStorage.getItem('eic_user');
+                if (cached) {
+                    try { currentUser = JSON.parse(cached); } catch(err) { currentUser = null; }
+                }
+            }
+            updateHeaderAuthUI();
+        }
+
+        function updateHeaderAuthUI() {
+            const role = currentUser ? (currentUser.role || 'guest') : 'guest';
+            const isAdmin = role === 'all' || role === 'admin';
+            const isGeneral = role === 'general';
+            const isActuator = role === 'actuator';
+            const isInstrument = role === 'instrument' || role === 'transmitter';
+
+            const woTab = document.getElementById('tab-btn-wo');
+            const actTab = document.getElementById('tab-btn-actuator');
+            const instTab = document.getElementById('tab-btn-instrument');
+            const scopeTab = document.getElementById('tab-btn-scope');
+            const archiveTab = document.getElementById('tab-btn-archive');
+
+            const sideWo = document.getElementById('side-card-wo');
+            const sideAct = document.getElementById('side-card-act');
+            const sideInst = document.getElementById('side-card-inst');
+
+            const stickyWo = document.getElementById('sticky-pill-wo');
+            const stickyAct = document.getElementById('sticky-pill-act');
+            const stickyInst = document.getElementById('sticky-pill-inst');
+
+            if (isInstrument) {
+                // Role Instrument: ONLY Instruments tab
+                if (woTab) woTab.style.display = 'none';
+                if (actTab) actTab.style.display = 'none';
+                if (instTab) instTab.style.display = 'inline-flex';
+                if (scopeTab) scopeTab.style.display = 'none';
+                if (archiveTab) archiveTab.style.display = 'none';
+
+                if (sideWo) sideWo.style.display = 'none';
+                if (sideAct) sideAct.style.display = 'none';
+                if (sideInst) sideInst.style.display = 'block';
+
+                if (stickyWo) stickyWo.style.display = 'none';
+                if (stickyAct) stickyAct.style.display = 'none';
+                if (stickyInst) stickyInst.style.display = 'inline-block';
+
+                if (currentTab !== 'instrument') {
+                    switchTab('instrument');
+                }
+            } else if (isActuator) {
+                // Role Actuator: ONLY Actuators tab
+                if (woTab) woTab.style.display = 'none';
+                if (actTab) actTab.style.display = 'inline-flex';
+                if (instTab) instTab.style.display = 'none';
+                if (scopeTab) scopeTab.style.display = 'none';
+                if (archiveTab) archiveTab.style.display = 'none';
+
+                if (sideWo) sideWo.style.display = 'none';
+                if (sideAct) sideAct.style.display = 'block';
+                if (sideInst) sideInst.style.display = 'none';
+
+                if (stickyWo) stickyWo.style.display = 'none';
+                if (stickyAct) stickyAct.style.display = 'inline-block';
+                if (stickyInst) stickyInst.style.display = 'none';
+
+                if (currentTab !== 'actuator') {
+                    switchTab('actuator');
+                }
+            } else if (isGeneral) {
+                // Role General: WO, Actuator, and Instrument (NO Scope, NO Archive)
+                if (woTab) woTab.style.display = 'inline-flex';
+                if (actTab) actTab.style.display = 'inline-flex';
+                if (instTab) instTab.style.display = 'inline-flex';
+                if (scopeTab) scopeTab.style.display = 'none';
+                if (archiveTab) archiveTab.style.display = 'none';
+
+                if (sideWo) sideWo.style.display = 'block';
+                if (sideAct) sideAct.style.display = 'block';
+                if (sideInst) sideInst.style.display = 'block';
+
+                if (stickyWo) stickyWo.style.display = 'inline-block';
+                if (stickyAct) stickyAct.style.display = 'inline-block';
+                if (stickyInst) stickyInst.style.display = 'inline-block';
+
+                if (currentTab === 'scope' || currentTab === 'archive') {
+                    switchTab('wo');
+                }
+            } else if (isAdmin) {
+                // Role Admin: ALL 5 tabs visible
+                if (woTab) woTab.style.display = 'inline-flex';
+                if (actTab) actTab.style.display = 'inline-flex';
+                if (instTab) instTab.style.display = 'inline-flex';
+                if (scopeTab) scopeTab.style.display = 'inline-flex';
+                if (archiveTab) archiveTab.style.display = 'inline-flex';
+
+                if (sideWo) sideWo.style.display = 'block';
+                if (sideAct) sideAct.style.display = 'block';
+                if (sideInst) sideInst.style.display = 'block';
+
+                if (stickyWo) stickyWo.style.display = 'inline-block';
+                if (stickyAct) stickyAct.style.display = 'inline-block';
+                if (stickyInst) stickyInst.style.display = 'inline-block';
+            } else {
+                // Guest mode
+                if (woTab) woTab.style.display = 'inline-flex';
+                if (actTab) actTab.style.display = 'inline-flex';
+                if (instTab) instTab.style.display = 'inline-flex';
+                if (scopeTab) scopeTab.style.display = 'none';
+                if (archiveTab) archiveTab.style.display = 'none';
+
+                if (sideWo) sideWo.style.display = 'block';
+                if (sideAct) sideAct.style.display = 'block';
+                if (sideInst) sideInst.style.display = 'block';
+
+                if (stickyWo) stickyWo.style.display = 'inline-block';
+                if (stickyAct) stickyAct.style.display = 'inline-block';
+                if (stickyInst) stickyInst.style.display = 'inline-block';
+
+                if (currentTab === 'scope' || currentTab === 'archive') {
+                    switchTab('wo');
+                }
+            }
+
+            const badgeContainer = document.getElementById('header-auth-badge');
+            const menuDropdown = document.getElementById('header-dropdown-menu');
+
+            if (currentUser) {
+                let roleColor = currentUser.badge_color;
+                if (!roleColor) {
+                    if (isAdmin) roleColor = '#10b981';
+                    else if (isGeneral) roleColor = '#8b5cf6';
+                    else if (isActuator) roleColor = '#f59e0b';
+                    else roleColor = '#0ea5e9';
+                }
+                const roleName = isAdmin ? 'Admin' : (isGeneral ? 'General' : (isActuator ? 'Actuator' : 'Instrument'));
+                
+                if (badgeContainer) {
+                    badgeContainer.innerHTML = `
+                        <div class="user-profile-badge" title="Role: ${roleName} | 48-Hour Session">
+                            <span style="width:7px; height:7px; border-radius:50%; background:${roleColor}; box-shadow:0 0 6px ${roleColor};"></span>
+                            <span style="font-weight:700; color:var(--text-main); font-size:0.8rem;">${currentUser.name || currentUser.username}</span>
+                            <span style="background:${roleColor}22; color:${roleColor}; border:1px solid ${roleColor}44; padding:1px 6px; border-radius:10px; font-size:0.65rem; font-weight:800; text-transform:uppercase;">${currentUser.role}</span>
+                        </div>
+                    `;
+                }
+
+                if (menuDropdown) {
+                    menuDropdown.innerHTML = `
+                        <div class="menu-user-info">
+                            <div class="menu-user-name">
+                                <span style="width:8px; height:8px; border-radius:50%; background:${roleColor};"></span>
+                                ${currentUser.name || currentUser.username}
+                            </div>
+                            <div class="menu-user-meta">
+                                <span>Role: <strong style="color:${roleColor}; text-transform:uppercase;">${currentUser.role}</strong></span>
+                                <span style="color:var(--status-finish); font-weight:700;">&bull; Active</span>
+                            </div>
+                        </div>
+                        <button class="menu-item-btn" onclick="closeHeaderMenu(); openReportModal();">
+                            <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                            Reports
+                        </button>
+                        ${isAdmin ? `
+                            <button class="menu-item-btn" onclick="closeHeaderMenu(); openRolloverAuthModal();">
+                                <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><polyline points="16 21 21 21 21 16"></polyline></svg>
+                                Rollover
+                            </button>
+                        ` : ''}
+                        <div class="menu-divider"></div>
+                        <button class="menu-item-btn danger" onclick="closeHeaderMenu(); handleLogout();">
+                            <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                            Sign Out
+                        </button>
+                    `;
+                }
+            } else {
+                if (badgeContainer) {
+                    badgeContainer.innerHTML = `
+                        <div class="guest-mode-badge" title="Public Read-Only Mode">
+                            <span style="width:6px; height:6px; border-radius:50%; background:#64748b;"></span>
+                            Guest
+                        </div>
+                    `;
+                }
+
+                if (menuDropdown) {
+                    menuDropdown.innerHTML = `
+                        <div class="menu-user-info">
+                            <div class="menu-user-name">
+                                <span style="width:8px; height:8px; border-radius:50%; background:#64748b;"></span>
+                                Guest Mode
+                            </div>
+                            <div class="menu-user-meta">
+                                <span>Read-Only Access</span>
+                            </div>
+                        </div>
+                        <button class="menu-item-btn" onclick="closeHeaderMenu(); openReportModal();">
+                            <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                            Reports
+                        </button>
+                        <button class="menu-item-btn" onclick="closeHeaderMenu(); openRolloverAuthModal();">
+                            <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><polyline points="16 21 21 21 21 16"></polyline></svg>
+                            Rollover
+                        </button>
+                        <div class="menu-divider"></div>
+                        <a href="/login" class="menu-item-btn" style="color:var(--primary);">
+                            <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+                            Sign In
+                        </a>
+                    `;
+                }
+            }
+        }
+
+        function toggleHeaderMenu(event) {
+            if (event) event.stopPropagation();
+            const menu = document.getElementById('header-dropdown-menu');
+            const btn = document.getElementById('header-menu-btn');
+            if (!menu) return;
+            const isOpen = menu.classList.contains('active');
+            if (isOpen) {
+                closeHeaderMenu();
+            } else {
+                menu.classList.add('active');
+                if (btn) btn.classList.add('active');
+            }
+        }
+
+        function closeHeaderMenu() {
+            const menu = document.getElementById('header-dropdown-menu');
+            const btn = document.getElementById('header-menu-btn');
+            if (menu) menu.classList.remove('active');
+            if (btn) btn.classList.remove('active');
+        }
+
+        document.addEventListener('click', function(e) {
+            const container = document.querySelector('.header-menu-container');
+            if (container && !container.contains(e.target)) {
+                closeHeaderMenu();
+            }
+        });
+
+        async function handleLogout() {
+            const token = localStorage.getItem('eic_session_token');
+            try {
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+                    },
+                    body: JSON.stringify({ token: token || '' })
+                });
+            } catch(e) {}
+            currentUser = null;
+            localStorage.removeItem('eic_session_token');
+            localStorage.removeItem('eic_user');
+            document.cookie = "eic_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; SameSite=Lax;";
+            document.cookie = "eic_session=; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;";
+            window.location.reload();
+        }
+
+        function checkRolePermission(allowedRoles, actionName) {
+            if (!currentUser) {
+                openAuthAlertModal(allowedRoles, actionName, true);
+                return false;
+            }
+            if (currentUser.role === 'all' || currentUser.role === 'admin') return true;
+            if (allowedRoles.includes(currentUser.role)) return true;
+            if (allowedRoles.includes('instrument') && currentUser.role === 'transmitter') return true;
+            if (allowedRoles.includes('transmitter') && currentUser.role === 'instrument') return true;
+            
+            openAuthAlertModal(allowedRoles, actionName, false);
+            return false;
+        }
+
+        function openAuthAlertModal(allowedRoles, actionName, isGuest) {
+            const roleLabels = allowedRoles.map(r => {
+                if (r === 'all' || r === 'admin') return 'Admin';
+                if (r === 'general') return 'General';
+                if (r === 'actuator') return 'Actuator';
+                if (r === 'instrument' || r === 'transmitter') return 'Instrument';
+                return r;
+            }).join(' or ');
+            const titleEl = document.getElementById('auth-alert-title');
+            const msgEl = document.getElementById('auth-alert-msg');
+            const modal = document.getElementById('auth-alert-modal');
+            
+            if (titleEl) {
+                titleEl.innerText = isGuest ? 'Access Restricted' : 'Insufficient Permissions';
+            }
+            if (msgEl) {
+                msgEl.innerHTML = isGuest 
+                    ? `Action <strong>"${actionName}"</strong> requires authentication with <strong>${roleLabels}</strong>.<br><br>You are currently in Guest Mode. Please sign in to make updates.`
+                    : `Your account (<strong>${currentUser.name || currentUser.username}</strong> - Role: <em>${currentUser.role}</em>) does not have permission for <strong>"${actionName}"</strong>.<br><br>Required role: <strong>${roleLabels}</strong>.`;
+            }
+            if (modal) modal.classList.add('active');
+        }
+
+        function closeAuthAlertModal() {
+            const modal = document.getElementById('auth-alert-modal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        // Helper to add auth header to all requests
+        function getAuthHeaders(customHeaders = {}) {
+            const token = localStorage.getItem('eic_session_token');
+            const headers = { ...customHeaders };
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            return headers;
+        }
+
+        /* ==========================================================================
+           TRANSMITTER CALIBRATION DOCUMENT MODAL & UPLOAD
+           ========================================================================== */
+        let activeCalibItem = null; // { type, kks, name, area, files: [] }
+        let selectedCalibFileBase64 = '';
+        let selectedCalibFilename = '';
+
+        function openCalibDocModal(instType, kks, eqName, area) {
+            // Find instrument data in fullData
+            let items = (instType === 'ptx' || instType === 'pressure_tx') ? (fullData.pressure_tx || []) : (fullData.temperature_tx || []);
+            let item = items.find(it => String(it.kks || it.no) === String(kks));
+            
+            activeCalibItem = {
+                type: (instType === 'ptx' || instType === 'pressure_tx') ? 'pressure_tx' : 'temperature_tx',
+                kks: kks,
+                eqName: eqName || (item ? item.equipment : ''),
+                area: area || (item ? item.area : ''),
+                item: item
+            };
+
+            document.getElementById('calib-modal-kks').innerText = kks || '-';
+            document.getElementById('calib-modal-eq').innerText = activeCalibItem.eqName || '-';
+            document.getElementById('calib-modal-area').innerText = activeCalibItem.area || '-';
+            document.getElementById('calib-modal-type').innerText = (activeCalibItem.type === 'pressure_tx') ? 'Pressure Transmitter (PTX)' : 'Temperature Transmitter (TTX)';
+            document.getElementById('calib-modal-subtitle').innerText = `Tag: ${kks} • ${activeCalibItem.eqName}`;
+
+            renderCalibFilesList();
+
+            // Check permissions for upload box
+            const uploadSection = document.getElementById('calib-upload-section');
+            if (uploadSection) {
+                const canUpload = currentUser && (currentUser.role === 'transmitter' || currentUser.role === 'all');
+                if (!canUpload) {
+                    uploadSection.style.opacity = '0.6';
+                    uploadSection.title = 'Transmitter or Admin role required to upload calibration files';
+                } else {
+                    uploadSection.style.opacity = '1';
+                    uploadSection.title = '';
+                }
+            }
+
+            // Reset upload file picker
+            resetCalibFileInput();
+
+            const modal = document.getElementById('calib-doc-modal');
+            if (modal) modal.classList.add('active');
+        }
+
+        function closeCalibDocModal() {
+            const modal = document.getElementById('calib-doc-modal');
+            if (modal) modal.classList.remove('active');
+            activeCalibItem = null;
+        }
+
+        function renderCalibFilesList() {
+            const listEl = document.getElementById('calib-files-list');
+            const countEl = document.getElementById('calib-files-count');
+            if (!listEl) return;
+
+            const files = (activeCalibItem && activeCalibItem.item && activeCalibItem.item.calibration_files) || [];
+            if (countEl) countEl.innerText = `${files.length} Files`;
+
+            if (files.length === 0) {
+                listEl.innerHTML = `
+                    <div style="text-align:center; padding:32px 16px; color:var(--text-muted); font-size:0.84rem;">
+                        <svg class="ui-icon" style="width:36px; height:36px; opacity:0.4; margin-bottom:8px;" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                        <div>No calibration files uploaded yet for this instrument.</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const canDelete = currentUser && (currentUser.role === 'transmitter' || currentUser.role === 'all');
+
+            let html = '';
+            files.forEach(f => {
+                const isPdf = f.file_type === 'pdf';
+                const isExcel = f.file_type === 'excel';
+                const iconSvg = isPdf 
+                    ? `<svg class="ui-icon xs" style="color:#f43f5e;" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`
+                    : (isExcel 
+                        ? `<svg class="ui-icon xs" style="color:#10b981;" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg>`
+                        : `<svg class="ui-icon xs" style="color:#38bdf8;" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`);
+
+                html += `
+                    <div class="calib-file-item">
+                        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                            ${iconSvg}
+                            <div style="min-width:0;">
+                                <div style="font-size:0.82rem; font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.filename}</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">${f.size_formatted} • Uploaded: ${f.upload_date}</div>
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                            <a href="${f.url}" target="_blank" download="${f.filename}" class="btn-archive-dl" style="padding:4px 8px; font-size:0.72rem;" title="Download File">
+                                Download
+                            </a>
+                            ${canDelete ? `
+                                <button type="button" onclick="executeCalibDelete('${f.filename}')" class="btn-logout" style="padding:4px 8px; font-size:0.72rem;" title="Delete File">
+                                    🗑️
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            listEl.innerHTML = html;
+        }
+
+        function handleCalibFileSelected(input) {
+            if (!input.files || input.files.length === 0) return;
+            const file = input.files[0];
+            
+            if (!checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Upload Calibration Files')) {
+                input.value = '';
+                return;
+            }
+
+            selectedCalibFilename = file.name;
+            const sizeStr = file.size < 1024*1024 ? `${(file.size/1024).toFixed(1)} KB` : `${(file.size/(1024*1024)).toFixed(1)} MB`;
+
+            document.getElementById('calib-selected-filename').innerText = file.name;
+            document.getElementById('calib-selected-filesize').innerText = `(${sizeStr})`;
+            document.getElementById('calib-upload-selected-info').style.display = 'flex';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                selectedCalibFileBase64 = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function resetCalibFileInput() {
+            selectedCalibFileBase64 = '';
+            selectedCalibFilename = '';
+            const inp = document.getElementById('calib-file-input');
+            if (inp) inp.value = '';
+            const selInfo = document.getElementById('calib-upload-selected-info');
+            if (selInfo) selInfo.style.display = 'none';
+            const msg = document.getElementById('calib-upload-msg');
+            if (msg) msg.style.display = 'none';
+        }
+
+        async function executeCalibUpload() {
+            if (!activeCalibItem || !selectedCalibFileBase64 || !selectedCalibFilename) return;
+            if (!checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Upload Calibration Files')) return;
+
+            const btn = document.getElementById('btn-do-calib-upload');
+            const msg = document.getElementById('calib-upload-msg');
+
+            btn.disabled = true;
+            btn.innerText = 'Mengunggah...';
+            msg.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/upload_calibration_file', {
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({
+                        unit: currentUnit,
+                        type: activeCalibItem.type,
+                        kks: activeCalibItem.kks,
+                        filename: selectedCalibFilename,
+                        file_base64: selectedCalibFileBase64
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (activeCalibItem.item) {
+                        activeCalibItem.item.calibration_files = data.files || [];
+                        activeCalibItem.item.calibration_count = data.count || 0;
+                    }
+                    renderCalibFilesList();
+                    resetCalibFileInput();
+                    showToast('✓ ' + data.message, 'success');
+                    // Refresh current tab silently to update badges
+                    renderTabContent();
+                } else {
+                    msg.innerText = data.message || 'Failed to upload document.';
+                    msg.style.color = '#f43f5e';
+                    msg.style.display = 'block';
+                }
+            } catch(e) {
+                msg.innerText = 'Server error: ' + e.message;
+                msg.style.color = '#f43f5e';
+                msg.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Upload File';
+            }
+        }
+
+        async function executeCalibDelete(filename) {
+            if (!activeCalibItem || !filename) return;
+            if (!checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Delete Calibration Files')) return;
+
+            if (!confirm(`Delete calibration document "${filename}"?`)) return;
+
+            try {
+                const res = await fetch('/api/delete_calibration_file', {
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({
+                        unit: currentUnit,
+                        type: activeCalibItem.type,
+                        kks: activeCalibItem.kks,
+                        filename: filename
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (activeCalibItem.item) {
+                        activeCalibItem.item.calibration_files = data.files || [];
+                        activeCalibItem.item.calibration_count = data.count || 0;
+                    }
+                    renderCalibFilesList();
+                    showToast('✓ Document deleted successfully.', 'info');
+                    renderTabContent();
+                } else {
+                    alert(data.message || 'Failed to delete file.');
+                }
+            } catch(e) {
+                alert('Server connection error: ' + e.message);
+            }
+        }
+
+        /* ==========================================================================
+           DATA ARCHIVE PAGE & DOWNLOAD LOGIC
+           ========================================================================== */
+        let archiveListCache = [];
+
+        async function renderArchiveTab(container) {
+            if (!currentUser || currentUser.role !== 'all') {
+                container.innerHTML = `
+                    <div style="text-align:center; padding:64px 24px; background:var(--bg-card); border-radius:var(--radius-lg); border:1px solid var(--border-color); max-width:620px; margin:40px auto; box-shadow:var(--shadow-card);">
+                        <div style="width:72px; height:72px; border-radius:50%; background:rgba(239,68,68,0.12); color:#ef4444; display:flex; align-items:center; justify-content:center; margin:0 auto 20px;">
+                            <svg class="ui-icon" style="width:36px; height:36px;" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        </div>
+                        <h2 style="font-size:1.35rem; font-weight:800; color:var(--text-main); margin-bottom:8px;">Data Archive Restricted</h2>
+                        <p style="color:var(--text-muted); font-size:0.9rem; line-height:1.6; margin-bottom:24px;">
+                            Historical data archives and Excel workbooks are restricted to <strong>All Feature (Administrator)</strong> role.
+                        </p>
+                        <div style="display:flex; justify-content:center; gap:12px;">
+                            <a href="/login" class="btn-save" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                                <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+                                Sign In as Admin
+                            </a>
+                            <button type="button" class="page-btn" onclick="switchTab('wo')">Back to Work Orders</button>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = `
+                <div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
+                    <svg class="ui-icon spin" style="width:32px; height:32px; color:var(--primary); margin-bottom:12px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg>
+                    <div>Loading historical archive files...</div>
+                </div>
+            `;
+
+            try {
+                const res = await fetch('/api/archive_list', {
+                    headers: getAuthHeaders()
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    archiveListCache = data.archives || [];
+                    buildArchivePageHTML(container);
+                } else {
+                    container.innerHTML = `<div style="padding:24px; color:#f43f5e; background:var(--bg-card); border-radius:12px;">Failed to load archives: ${data.message}</div>`;
+                }
+            } catch(e) {
+                container.innerHTML = `<div style="padding:24px; color:#f43f5e; background:var(--bg-card); border-radius:12px;">Server error: ${e.message}</div>`;
+            }
+        }
+
+        function buildArchivePageHTML(container) {
+            const totalArchives = archiveListCache.length;
+            let totalBytes = 0;
+            archiveListCache.forEach(a => totalBytes += (a.total_size || 0));
+            const totalSizeFormatted = totalBytes < 1024*1024 ? `${(totalBytes/1024).toFixed(1)} KB` : `${(totalBytes/(1024*1024)).toFixed(1)} MB`;
+            const lastArchive = archiveListCache.length > 0 ? archiveListCache[0].created_at : 'None';
+
+            let html = `
+                <div class="archive-hero-banner">
+                    <div>
+                        <div style="display:inline-flex; align-items:center; gap:8px; background:rgba(56,189,248,0.12); color:var(--primary); border:1px solid rgba(56,189,248,0.25); padding:4px 12px; border-radius:20px; font-size:0.75rem; font-weight:800; margin-bottom:8px;">
+                            <svg class="ui-icon xs" style="width:12px; height:12px;" viewBox="0 0 24 24"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path></svg>
+                            DATA ARCHIVE
+                        </div>
+                        <h2 style="font-size:1.45rem; font-weight:800; color:var(--text-main); margin-bottom:4px;">Data Archive</h2>
+                        <p style="font-size:0.85rem; color:var(--text-muted); max-width:620px;">
+                            Historical outage Excel workbooks and documentation backups.
+                        </p>
+                    </div>
+                    <div>
+                        <button class="btn-save" onclick="openArchiveSnapshotModal()" style="display:inline-flex; align-items:center; gap:8px; padding:10px 18px; font-size:0.88rem; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
+                            <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                            Create Snapshot
+                        </button>
+                    </div>
+                </div>
+
+                <div class="archive-stats-row">
+                    <div class="archive-kpi-card">
+                        <div class="archive-kpi-icon" style="background:rgba(56,189,248,0.12); color:var(--primary);">
+                            <svg class="ui-icon" style="width:24px; height:24px;" viewBox="0 0 24 24"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path><path d="M10 12h4"></path></svg>
+                        </div>
+                        <div>
+                            <div style="font-size:1.35rem; font-weight:800; color:var(--text-main);">${totalArchives} Snapshots</div>
+                            <div style="font-size:0.75rem; color:var(--text-muted);">Total Snapshots</div>
+                        </div>
+                    </div>
+                    <div class="archive-kpi-card">
+                        <div class="archive-kpi-icon" style="background:rgba(99,102,241,0.12); color:#818cf8;">
+                            <svg class="ui-icon" style="width:24px; height:24px;" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+                        </div>
+                        <div>
+                            <div style="font-size:1.35rem; font-weight:800; color:var(--text-main);">${totalSizeFormatted}</div>
+                            <div style="font-size:0.75rem; color:var(--text-muted);">Storage Used</div>
+                        </div>
+                    </div>
+                    <div class="archive-kpi-card">
+                        <div class="archive-kpi-icon" style="background:rgba(16,185,129,0.12); color:var(--status-finish);">
+                            <svg class="ui-icon" style="width:24px; height:24px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        </div>
+                        <div>
+                            <div style="font-size:0.95rem; font-weight:800; color:var(--text-main);">${lastArchive}</div>
+                            <div style="font-size:0.75rem; color:var(--text-muted);">Latest Snapshot</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (archiveListCache.length === 0) {
+                html += `
+                    <div style="text-align:center; padding:60px 20px; background:var(--bg-card); border-radius:var(--radius-lg); border:1px solid var(--border-color);">
+                        <svg class="ui-icon" style="width:48px; height:48px; color:var(--text-muted); opacity:0.5; margin-bottom:12px;" viewBox="0 0 24 24"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path></svg>
+                        <h3 style="font-size:1.1rem; font-weight:700; color:var(--text-main);">No Archive Snapshots</h3>
+                        <p style="font-size:0.84rem; color:var(--text-muted); margin-top:4px;">Click "Create Snapshot" above to back up current Excel workbooks.</p>
+                    </div>
+                `;
+            } else {
+                html += '<div class="archive-grid">';
+                archiveListCache.forEach(item => {
+                    const u1SizeStr = item.unit1_size < 1024*1024 ? `${(item.unit1_size/1024).toFixed(1)} KB` : `${(item.unit1_size/(1024*1024)).toFixed(1)} MB`;
+                    const u2SizeStr = item.unit2_size < 1024*1024 ? `${(item.unit2_size/1024).toFixed(1)} KB` : `${(item.unit2_size/(1024*1024)).toFixed(1)} MB`;
+
+                    html += `
+                        <div class="archive-card">
+                            <div>
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                                    <span style="font-size:0.72rem; font-weight:800; color:var(--primary); background:rgba(56,189,248,0.12); padding:2px 8px; border-radius:10px; border:1px solid rgba(56,189,248,0.25);">
+                                        📁 ${item.total_size_formatted}
+                                    </span>
+                                    <span style="font-size:0.75rem; color:var(--text-muted); display:inline-flex; align-items:center; gap:4px;">
+                                        <svg class="ui-icon xs" style="width:12px; height:12px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                        ${item.created_at}
+                                    </span>
+                                </div>
+                                <h3 style="font-size:1.05rem; font-weight:800; color:var(--text-main); margin-bottom:12px; word-break:break-word;">
+                                    ${item.folder_name}
+                                </h3>
+
+                                <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
+                                    ${item.has_unit1 ? `
+                                        <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-sub); padding:7px 10px; border-radius:6px; border:1px solid var(--border-color);">
+                                            <div style="font-size:0.78rem; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                                                <span style="color:#10b981;">📊</span> Unit 1 Excel (${u1SizeStr})
+                                            </div>
+                                            <a href="/api/download_archive_file?folder=${encodeURIComponent(item.folder_name)}&file=${encodeURIComponent(item.unit1_filename)}" class="btn-archive-dl" style="padding:3px 8px; font-size:0.72rem;">
+                                                Download
+                                            </a>
+                                        </div>
+                                    ` : ''}
+
+                                    ${item.has_unit2 ? `
+                                        <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-sub); padding:7px 10px; border-radius:6px; border:1px solid var(--border-color);">
+                                            <div style="font-size:0.78rem; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+                                                <span style="color:#10b981;">📊</span> Unit 2 Excel (${u2SizeStr})
+                                            </div>
+                                            <a href="/api/download_archive_file?folder=${encodeURIComponent(item.folder_name)}&file=${encodeURIComponent(item.unit2_filename)}" class="btn-archive-dl" style="padding:3px 8px; font-size:0.72rem;">
+                                                Download
+                                            </a>
+                                        </div>
+                                    ` : ''}
+
+                                    ${item.photo_count > 0 ? `
+                                        <div style="font-size:0.75rem; color:var(--text-muted); display:inline-flex; align-items:center; gap:5px; margin-top:2px;">
+                                            <span>📷</span> Includes ${item.photo_count} finding photos
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+
+                            <div>
+                                <a href="/api/download_archive_zip?folder=${encodeURIComponent(item.folder_name)}" class="btn-archive-zip">
+                                    <svg class="ui-icon xs" style="width:14px; height:14px;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    Download ZIP
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        function openArchiveSnapshotModal() {
+            if (!checkRolePermission(['all'], 'Create Archive Snapshot')) return;
+            const input = document.getElementById('snapshot-label-input');
+            const err = document.getElementById('snapshot-error-msg');
+            const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            if (input) input.value = `Snapshot_Unit_${currentUnit}_${dateStr}`;
+            if (err) err.style.display = 'none';
+
+            const modal = document.getElementById('archive-snapshot-modal');
+            if (modal) modal.classList.add('active');
+        }
+
+        function closeArchiveSnapshotModal() {
+            const modal = document.getElementById('archive-snapshot-modal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        async function submitArchiveSnapshot(e) {
+            e.preventDefault();
+            if (!checkRolePermission(['all'], 'Create Archive Snapshot')) return;
+
+            const input = document.getElementById('snapshot-label-input');
+            const btn = document.getElementById('btn-create-snapshot');
+            const err = document.getElementById('snapshot-error-msg');
+
+            const labelVal = input.value.trim();
+            if (!labelVal) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<span>Saving Snapshot...</span>';
+            err.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/create_archive_snapshot', {
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ label: labelVal })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    closeArchiveSnapshotModal();
+                    showToast('✓ ' + data.message, 'success');
+                    if (currentTab === 'archive') {
+                        renderArchiveTab(document.getElementById('tab-content'));
+                    }
+                } else {
+                    err.innerText = data.message || 'Failed to create snapshot.';
+                    err.style.display = 'block';
+                }
+            } catch(e) {
+                err.innerText = 'Server error: ' + e.message;
+                err.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> <span>Create Snapshot</span>';
+            }
+        }
+
+
         function switchTab(tab) {
+            const role = currentUser ? (currentUser.role || 'guest') : 'guest';
+            const isAdmin = role === 'all' || role === 'admin';
+            const isGeneral = role === 'general';
+            const isActuator = role === 'actuator';
+            const isInstrument = role === 'instrument' || role === 'transmitter';
+
+            if (isInstrument) {
+                tab = 'instrument';
+            } else if (isActuator) {
+                tab = 'actuator';
+            } else if (!isAdmin && (tab === 'scope' || tab === 'archive')) {
+                tab = 'wo';
+            }
             currentTab = tab;
             currentPage = 1;
+            const tabKeys = ['wo', 'actuator', 'instrument', 'scope', 'archive'];
             document.querySelectorAll('.nav-tabs .tab-btn').forEach((btn, i) => {
-                btn.classList.toggle('active', ['wo', 'actuator', 'instrument', 'scope'][i] === tab);
+                btn.classList.toggle('active', tabKeys[i] === tab);
             });
-            document.getElementById('view-switcher-box').style.display = (tab === 'scope') ? 'none' : 'flex';
+            const viewSwitcher = document.getElementById('view-switcher-box');
+            if (viewSwitcher) viewSwitcher.style.display = (tab === 'scope' || tab === 'archive') ? 'none' : 'flex';
+            const filterBar = document.querySelector('.filter-toolbar');
+            if (filterBar) filterBar.style.display = (tab === 'archive') ? 'none' : 'block';
             renderTabContent();
         }
 
@@ -5222,7 +7657,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             html += `
             <div style="margin-bottom:20px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-wo-form')">
-                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add New Work Order (WO)</h3>
+                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add Work Order</h3>
                     <span id="arrow-add-wo-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddWoOpen ? 'Close Form' : 'Add'}</span>
                 </div>
                 <div id="add-wo-form" class="accordion-form ${isAddWoOpen ? 'open' : ''}" style="${isAddWoOpen ? 'display:block;' : ''}">
@@ -5256,7 +7691,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
-                        <button class="btn-save" onclick="saveNewWO()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Work Order</button>
+                        <button class="btn-save" onclick="saveNewWO()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Work Order</button>
                         <button class="page-btn" onclick="toggleAccordion('add-wo-form')">Cancel</button>
                     </div>
                 </div>
@@ -5338,21 +7773,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                         <span style="font-size:0.78rem; font-weight:700; color:var(--text-muted);">Add Sub-task to WO:</span>
                                         <div style="display:flex; gap:5px;">
                                             <button type="button" class="comp-mode-btn btn-mode-manual ${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'manual')">Manual</button>
-                                            <button type="button" class="comp-mode-btn btn-mode-act ${subtaskAddModes[item.no_wo]==='actuator'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'actuator')">Select Actuator (${(fullData.master_actuators||fullData.actuators||[]).length})</button>
-                                            <button type="button" class="comp-mode-btn btn-mode-inst ${subtaskAddModes[item.no_wo]==='instrument'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'instrument')">Select Instrument (${((fullData.pressure_tx||[]).length + (fullData.temperature_tx||[]).length + (fullData.pressure_switch||[]).length)})</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-act ${subtaskAddModes[item.no_wo]==='actuator'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'actuator')">Actuators (${(fullData.master_actuators||fullData.actuators||[]).length})</button>
+                                            <button type="button" class="comp-mode-btn btn-mode-inst ${subtaskAddModes[item.no_wo]==='instrument'?'active':''}" onclick="setSubtaskMode('${item.no_wo}', 'instrument')">Instruments (${((fullData.pressure_tx||[]).length + (fullData.temperature_tx||[]).length + (fullData.pressure_switch||[]).length)})</button>
                                         </div>
                                     </div>
                                     
                                     <!-- Mode 1: Manual Input -->
                                     <div id="box-subtask-manual-${item.no_wo}" style="display:${(subtaskAddModes[item.no_wo]||'manual')==='manual'?'flex':'none'}; gap:8px;">
-                                        <input type="text" id="new-subtask-${item.no_wo}" class="filter-input" placeholder="Type sub-task description (e.g. MOTOR FRAME INSPECTION)..." style="flex-grow:1; font-size:0.82rem;">
+                                        <input type="text" id="new-subtask-${item.no_wo}" class="filter-input" placeholder="Sub-task name (e.g. Motor Inspection)..." style="flex-grow:1; font-size:0.82rem;">
                                         <button class="btn-save" style="padding:6px 14px; font-size:0.8rem; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;" onclick="addSubtask('${item.no_wo}', 'manual')">${Icons.plus} Add</button>
                                     </div>
 
                                     <!-- Mode 2: Actuator Dropdown Picker -->
                                     <div id="box-subtask-act-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='actuator'?'flex':'none'}; gap:8px;">
                                         <select id="new-subtask-act-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
-                                            <option value="">-- Select Actuator Valve from Master List --</option>
+                                            <option value="">-- Select Actuator --</option>
                                             ${(fullData.master_actuators || fullData.actuators || []).map(a => `
                                                 <option value="${a.equipment_description} ${a.kks||''}">[${a.area}] ${a.equipment_description} ${a.kks ? '('+a.kks+')' : ''}</option>
                                             `).join('')}
@@ -5363,7 +7798,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <!-- Mode 3: Instrument Dropdown Picker -->
                                     <div id="box-subtask-inst-${item.no_wo}" style="display:${subtaskAddModes[item.no_wo]==='instrument'?'flex':'none'}; gap:8px;">
                                         <select id="new-subtask-inst-${item.no_wo}" class="filter-input" style="flex-grow:1; font-size:0.82rem;">
-                                            <option value="">-- Select Instrument from Master List (PT/TT/PS) --</option>
+                                            <option value="">-- Select Instrument --</option>
                                             <optgroup label="Pressure Transmitter (PTX)">
                                                 ${(fullData.pressure_tx || []).map(p => `
                                                     <option value="${p.kks ? p.kks+': ' : ''}${p.equipment}">[PTX - ${p.area}] ${p.kks ? p.kks+' : ' : ''}${p.equipment}</option>
@@ -5495,7 +7930,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             html += `
             <div style="margin-bottom:20px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-act-form')">
-                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add New Actuator Valve</h3>
+                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add Actuator</h3>
                     <span id="arrow-add-act-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddActOpen ? 'Close Form' : 'Add'}</span>
                 </div>
                 <div id="add-act-form" class="accordion-form ${isAddActOpen ? 'open' : ''}" style="${isAddActOpen ? 'display:block;' : ''}">
@@ -5524,15 +7959,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </select>
                         </div>
                         <div class="form-group" style="grid-column: span 2;">
-                            <label>Terkait Work Order (WO)</label>
+                            <label>Linked Work Order</label>
                             <select id="new-act-wo" class="filter-input">
-                                <option value="">-- Pilih Work Order Terkait --</option>
+                                <option value="">-- Select Work Order --</option>
                                 ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}">${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
                             </select>
                         </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
-                        <button class="btn-save" onclick="saveNewActuator()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Actuator</button>
+                        <button class="btn-save" onclick="saveNewActuator()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Actuator</button>
                         <button class="page-btn" onclick="toggleAccordion('add-act-form')">Cancel</button>
                     </div>
                 </div>
@@ -5570,7 +8005,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                             ${Icons.clipboard || '📋'} ${item.no_wo}
                                         </span>
                                     ` : `
-                                        <span class="wo-badge unlinked" title="Belum terikat ke Work Order">
+                                        <span class="wo-badge unlinked" title="Unlinked">
                                             No WO
                                         </span>
                                     `}
@@ -5599,7 +8034,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <div class="checklist-item ${item.function_test ? 'done' : ''}">
                                         <label>
                                             <input type="checkbox" id="func-${item.equipment_id}" ${item.function_test ? 'checked' : ''} onchange="quickToggleActuator('${item.equipment_id}', 'function_test', this.checked)">
-                                            <span>Function Test & Stroke Check (50%)</span>
+                                            <span>Function Test (50%)</span>
                                         </label>
                                     </div>
                                 </div>
@@ -5607,9 +8042,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                             <div class="form-grid">
                                 <div class="form-group" style="grid-column: span 2;">
-                                    <label>Terkait Work Order (WO)</label>
+                                    <label>Linked Work Order</label>
                                     <select id="wo-act-${item.equipment_id}" class="filter-input">
-                                        <option value="">-- Tidak Terikat WO --</option>
+                                        <option value="">-- Unlinked --</option>
                                         ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${item.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
                                     </select>
                                 </div>
@@ -5794,7 +8229,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             let html = `
             <div style="margin-bottom:18px; background:var(--bg-card); border-radius:var(--radius-md); padding:16px; border:1px solid var(--border-color);">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleAccordion('add-inst-form')">
-                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add New Instrument</h3>
+                    <h3 style="font-size:0.95rem; color:var(--primary); font-weight:700; display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add Instrument</h3>
                     <span id="arrow-add-inst-form" style="font-weight:700; color:var(--text-muted); font-size:0.85rem;">${isAddInstOpen ? 'Close Form' : 'Add'}</span>
                 </div>
                 <div id="add-inst-form" class="accordion-form ${isAddInstOpen ? 'open' : ''}" style="${isAddInstOpen ? 'display:block;' : ''}">
@@ -5846,15 +8281,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </select>
                         </div>
                         <div class="form-group" style="grid-column: span 2;">
-                            <label>Terkait Work Order (WO)</label>
+                            <label>Linked Work Order</label>
                             <select id="new-inst-wo" class="filter-input">
-                                <option value="">-- Pilih Work Order Terkait --</option>
+                                <option value="">-- Select Work Order --</option>
                                 ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}">${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
                             </select>
                         </div>
                     </div>
                     <div style="display:flex; gap:10px; margin-top:14px;">
-                        <button class="btn-save" onclick="saveNewInstrument()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Instrument</button>
+                        <button class="btn-save" onclick="saveNewInstrument()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Instrument</button>
                         <button class="page-btn" onclick="toggleAccordion('add-inst-form')">Cancel</button>
                     </div>
                 </div>
@@ -5899,13 +8334,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <div class="item-code" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                                         <span style="font-family:'JetBrains Mono'; font-weight:700; color:var(--primary);">${item.kks || 'No Tag'}</span>
                                         <span>&bull; ${instSubtab === 'psw' ? (item.sub_area || item.area) : item.area}</span>
+                                        ${(item.calibration_count > 0) ? `
+                                            <span class="calib-doc-chip" onclick="event.stopPropagation(); openCalibDocModal('${instSubtab}', '${item.kks || item.no}', '${(title||'').replace(/'/g, "\\\\'")}', '${item.area}')" title="${item.calibration_count} calibration files attached">
+                                                📄 ${item.calibration_count} Files
+                                            </span>
+                                        ` : ''}
                                         ${(item.finish_date || item.dated || item.tanggal) ? '<span>&bull; Finished: ' + (item.finish_date || item.dated || item.tanggal) + '</span>' : ''}
                                         ${item.no_wo ? `
                                             <span class="wo-badge clickable" onclick="event.stopPropagation(); navigateToWO('${item.no_wo}')" title="${(item.wo_desc || item.no_wo).replace(/"/g, '&quot;')}">
                                                 ${Icons.clipboard || '📋'} ${item.no_wo}
                                             </span>
                                         ` : `
-                                            <span class="wo-badge unlinked" title="Belum terikat ke Work Order">
+                                            <span class="wo-badge unlinked" title="Unlinked">
                                                 No WO
                                             </span>
                                         `}
@@ -5922,12 +8362,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
                             <div class="header-actions">
-                                <span class="status-badge ${isVerif ? 'badge-FINISH' : (isCalib ? 'badge-IN-PROGRESS' : 'badge-SCHED-OK')}" id="badge-${cardPrefix}-${idx}">${isVerif ? 'DONE (100%)' : (isCalib ? 'IN PROGRESS (Calibration OK)' : 'SCHEDULED')}</span>
+                                <span class="status-badge ${isVerif ? 'badge-FINISH' : (isCalib ? 'badge-IN-PROGRESS' : 'badge-SCHED-OK')}" id="badge-${cardPrefix}-${idx}">${isVerif ? 'DONE (100%)' : (isCalib ? 'CALIBRATED' : 'SCHEDULED')}</span>
                             </div>
                         </div>
                         <div class="item-body ${isOpen ? 'open' : ''}" id="${bodyId}" style="${isOpen ? 'display:block;' : ''}">
                             <div class="checklist-section" style="margin-bottom:14px;">
-                                <div class="section-h4">Instrument Milestone Checklist (Verification determines Finish)</div>
+                                <div class="section-h4">Milestone Checklist</div>
                                 <div class="checklist-grid">
                                     <div class="checklist-item ${isCalib ? 'done' : ''}" id="card-calib-${cardPrefix}-${idx}">
                                         <label style="cursor:pointer; display:flex; align-items:center; gap:8px;">
@@ -5938,7 +8378,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <div class="checklist-item ${isVerif ? 'done' : ''}" id="card-verif-${cardPrefix}-${idx}" style="${isVerif ? 'border-color:var(--status-finish);' : ''}">
                                         <label style="cursor:pointer; display:flex; align-items:center; gap:8px;">
                                              <input type="checkbox" id="inst-verif-${idx}" ${isVerif ? 'checked' : ''} onchange="toggleLocalInstCheck('${instSubtab}', ${idx}, 'verifikasi', this.checked)">
-                                             <span style="font-weight:800; color:${isVerif ? 'var(--status-finish)' : 'var(--primary)'};">2. Verification Finished (100% DONE)</span>
+                                             <span style="font-weight:800; color:${isVerif ? 'var(--status-finish)' : 'var(--primary)'};">2. Verification Done (100%)</span>
                                         </label>
                                     </div>
                                 </div>
@@ -5974,9 +8414,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             </div>
                             <div class="form-grid">
                                 <div class="form-group" style="grid-column: span 2;">
-                                    <label>Terkait Work Order (WO)</label>
+                                    <label>Linked Work Order</label>
                                     <select id="wo-inst-${cardPrefix}-${idx}" class="filter-input">
-                                        <option value="">-- Tidak Terikat WO --</option>
+                                        <option value="">-- Unlinked --</option>
                                         ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${item.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
                                     </select>
                                 </div>
@@ -5989,9 +8429,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>` : `
                             <div class="form-grid">
                                 <div class="form-group" style="grid-column: span 2;">
-                                    <label>Terkait Work Order (WO)</label>
+                                    <label>Linked Work Order</label>
                                     <select id="wo-inst-${cardPrefix}-${idx}" class="filter-input">
-                                        <option value="">-- Tidak Terikat WO --</option>
+                                        <option value="">-- Unlinked --</option>
                                         ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${item.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
                                     </select>
                                 </div>`}
@@ -6009,9 +8449,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <button type="button" class="btn-finding ${hasFindings?'active':''}" onclick="openFindingModal('instrument', '${item.kks || item.no}', '${item.kks} - ${title.replace(/'/g, "\\'")}', '${item.area}', '${(item.temuan||'').replace(/'/g, "\\'")}', '${(item.tindak_lanjut||'').replace(/'/g, "\\'")}', '${instSubtab==='psw'?'pressure_switch':(instSubtab==='ptx'?'pressure_tx':'temperature_tx')}')">
                                         ${Icons.camera} ${item.jumlah_foto > 0 ? item.jumlah_foto + ' Photos' : (hasFindings ? 'Findings' : '+ Finding')}
                                     </button>
+                                    ${(instSubtab === 'ptx' || instSubtab === 'ttx') ? `
+                                        <button type="button" class="btn-calib-doc ${(item.calibration_count > 0)?'active':''}" onclick="openCalibDocModal('${instSubtab}', '${item.kks || item.no}', '${(title||'').replace(/'/g, "\\'")}', '${item.area}')" style="display:inline-flex; align-items:center; gap:6px;">
+                                            <svg class="ui-icon xs" style="width:13px; height:13px;" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                                            ${item.calibration_count > 0 ? item.calibration_count + ' Files' : '+ Upload File'}
+                                        </button>
+                                    ` : ''}
                                 </div>
                                 <div style="display:flex; gap:10px;">
-                                    <button class="btn-save" onclick="${instSubtab==='psw' ? 'savePressureSwitch' : 'saveTransmitter'}('${instSubtab}', '${item.kks || item.no}', ${idx})" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Calibration & Verification</button>
+                                    <button class="btn-save" onclick="${instSubtab==='psw' ? 'savePressureSwitch' : 'saveTransmitter'}('${instSubtab}', '${item.kks || item.no}', ${idx})" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Calibration</button>
                                 </div>
                             </div>
                         </div>
@@ -6159,21 +8605,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div class="lock-icon-circle ${isScopeMasterUnlocked ? 'open' : ''}">${isScopeMasterUnlocked ? Icons.unlock : Icons.lock}</div>
                         <div>
                             <div style="font-size:0.94rem; font-weight:800; color:${isScopeMasterUnlocked ? '#10b981' : 'var(--text-main)'};">
-                                ${isScopeMasterUnlocked ? 'Master Edit Mode Unlocked (Full Access)' : 'Master EIC Protection Mode (Protected)'}
+                                ${isScopeMasterUnlocked ? 'Edit Mode Active' : 'Protected Mode'}
                             </div>
                             <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
-                                ${isScopeMasterUnlocked ? 'You can add, edit, and delete Master PIC personnel and Outage Job Scope definitions.' : 'Master PIC personnel and Master Scope data are protected. Enter authorization password to unlock edit mode.'}
+                                ${isScopeMasterUnlocked ? 'Full access to edit PIC personnel and Master Scope definitions.' : 'Master scope is protected. Enter password to unlock editing.'}
                             </div>
                         </div>
                     </div>
                     <div>
                         ${isScopeMasterUnlocked ? `
                             <button class="page-btn" style="padding:7px 16px; font-size:0.82rem; color:#f43f5e; border-color:rgba(244,63,94,0.4); font-weight:700;" onclick="lockMasterScope()" title="Lock edit access">
-                                ${Icons.lock} Lock Mode
+                                ${Icons.lock} Lock
                             </button>
                         ` : `
                             <button class="btn-save" style="padding:8px 18px; font-size:0.84rem; background:linear-gradient(135deg, #6366f1, #4f46e5); box-shadow:0 4px 12px rgba(99,102,241,0.3);" onclick="openMasterPasswordModal()" title="Enter authorization password to unlock edit access">
-                                ${Icons.unlock} Unlock Edit Mode
+                                ${Icons.unlock} Unlock
                             </button>
                         `}
                     </div>
@@ -6199,7 +8645,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                     ${isScopeMasterUnlocked ? `
                         <div style="display:flex; gap:10px; max-width:480px;">
-                            <input type="text" id="new-pic-input" class="filter-input" placeholder="Enter new PIC personnel / vendor name..." style="flex-grow:1;">
+                            <input type="text" id="new-pic-input" class="filter-input" placeholder="New PIC name..." style="flex-grow:1;">
                             <button class="btn-save" onclick="addNewPic()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add PIC</button>
                         </div>
                     ` : ''}
@@ -6210,7 +8656,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
                         <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0; display:inline-flex; align-items:center; gap:8px;">${Icons.clipboard} Master Outage Job Scope</h3>
                         ${isScopeMasterUnlocked ? `
-                            <button class="page-btn" style="font-size:0.82rem; font-weight:700; display:inline-flex; align-items:center; gap:6px;" onclick="toggleAccordion('add-scope-form')">${openCardIds.has('add-scope-form') ? 'Close Scope Form' : Icons.plus + ' Add Scope'}</button>
+                            <button class="page-btn" style="font-size:0.82rem; font-weight:700; display:inline-flex; align-items:center; gap:6px;" onclick="toggleAccordion('add-scope-form')">${openCardIds.has('add-scope-form') ? 'Close Form' : Icons.plus + ' Add Scope'}</button>
                         ` : ''}
                     </div>
                     
@@ -6242,7 +8688,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
                             <div style="display:flex; gap:10px; margin-top:12px;">
-                                <button class="btn-save" onclick="saveNewScope()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save New Scope</button>
+                                <button class="btn-save" onclick="saveNewScope()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.save} Save Scope</button>
                                 <button class="page-btn" onclick="toggleAccordion('add-scope-form')">Cancel</button>
                             </div>
                         </div>
@@ -6314,6 +8760,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         function renderTabContent() {
             const container = document.getElementById('tab-content');
+            if(!container) return;
+            if (currentTab === 'archive') {
+                renderArchiveTab(container);
+                return;
+            }
             if(!fullData) return;
 
             if (currentTab === 'wo') renderWorkOrders(container);
@@ -6430,9 +8881,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <input type="text" id="edit-det-kks" class="filter-input" value="${currentData.kks || ''}" placeholder="10LAB30AA210">
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
-                        <label>Terkait Work Order (WO)</label>
+                        <label>Linked Work Order</label>
                         <select id="edit-det-no-wo" class="filter-input">
-                            <option value="">-- Tidak Terikat WO --</option>
+                            <option value="">-- Unlinked --</option>
                             ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${currentData.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
                         </select>
                     </div>
@@ -6456,9 +8907,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <input type="text" id="edit-det-area" class="filter-input" value="${currentData.area || ''}" placeholder="BOILER, ESP, TURBINE...">
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
-                        <label>Terkait Work Order (WO)</label>
+                        <label>Linked Work Order</label>
                         <select id="edit-det-no-wo" class="filter-input">
-                            <option value="">-- Tidak Terikat WO --</option>
+                            <option value="">-- Unlinked --</option>
                             ${(fullData.work_orders || []).map(w => `<option value="${w.no_wo}" ${currentData.no_wo===w.no_wo?'selected':''}>${w.no_wo} &bull; ${w.job_description}</option>`).join('')}
                         </select>
                     </div>
@@ -6522,6 +8973,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         async function saveEditDetails() {
             if (!activeEditDetails) return;
             const { itemType, identifier, instType } = activeEditDetails;
+            if (itemType === 'wo' && !checkRolePermission(['general', 'all'], 'Edit Work Order Details')) return;
+            if (itemType === 'actuator' && !checkRolePermission(['actuator', 'general', 'all'], 'Edit Actuator Details')) return;
+            if (itemType === 'instrument' && !checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Edit Instrument Details')) return;
             const payload = {
                 unit: currentUnit,
                 item_type: itemType,
@@ -6561,7 +9015,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/edit_details', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -6622,7 +9076,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         };
                         const res = await fetch('/api/upload_finding_photo', {
                             method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
+                            headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                             body: JSON.stringify(payload)
                         });
                         const result = await res.json();
@@ -6656,7 +9110,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 };
                 const res = await fetch('/api/delete_finding_photo', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -6687,7 +9141,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 };
                 const res = await fetch('/api/upload_finding_photo', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -7676,6 +10130,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         /* ---------------- QUICK ACTIONS (NO AUTO REFRESH) ---------------- */
         async function toggleLocalSubtask(noWo, cIdx, isChecked) {
+            if (!checkRolePermission(['general', 'all'], 'Update Work Order Checklist')) {
+                const chk = document.getElementById(`chk-${noWo}-${cIdx}`);
+                if (chk) chk.checked = !isChecked;
+                return;
+            }
             const item = (fullData.work_orders || []).find(w => w.no_wo === noWo);
             if(!item || !item.checklist || !item.checklist[cIdx]) return;
             
@@ -7738,7 +10197,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/quick_toggle_subtask', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({
                         unit: currentUnit,
                         no_wo: noWo,
@@ -7757,6 +10216,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         function toggleLocalInstCheck(instSubtab, idx, field, isChecked) {
+            if (!checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Update Instrument Calibration')) {
+                const el = document.getElementById(`inst-${field==='kalibrasi'?'calib':'verif'}-${idx}`);
+                if (el) el.checked = !isChecked;
+                return;
+            }
             let list = instSubtab === 'ptx' ? fullData.pressure_tx : (instSubtab === 'ttx' ? fullData.temperature_tx : fullData.pressure_switch);
             if(!list || !list[idx]) return;
             const item = list[idx];
@@ -7800,7 +10264,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/update_instrument', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -7823,6 +10287,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveWorkOrder(noWo) {
+            if (!checkRolePermission(['general', 'all'], 'Save Work Order Changes')) return;
             const item = (fullData.work_orders || []).find(w => w.no_wo === noWo);
             if (!item) return;
 
@@ -7855,7 +10320,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/update_wo', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -7867,6 +10332,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function quickToggleActuator(eqId, field, isChecked) {
+            if (!checkRolePermission(['actuator', 'general', 'all'], 'Update Actuator Milestone')) {
+                const el = document.getElementById(`${field==='general_inspection'?'gi':'ft'}-${eqId}`);
+                if (el) el.checked = !isChecked;
+                return;
+            }
             try {
                 const payload = {
                     unit: currentUnit,
@@ -7876,7 +10346,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 };
                 const res = await fetch('/api/quick_toggle_actuator', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -7892,6 +10362,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveActuator(eqId, desc) {
+            if (!checkRolePermission(['actuator', 'general', 'all'], 'Save Actuator Changes')) return;
             const genChk = document.getElementById(`gen-${eqId}`);
             const funcChk = document.getElementById(`func-${eqId}`);
             const isGen = genChk ? genChk.checked : false;
@@ -7915,7 +10386,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/update_actuator', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -7927,6 +10398,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveTransmitter(type, key, idx) {
+            if (!checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Save Transmitter Calibration')) return;
             const calibChk = document.getElementById(`inst-calib-${idx}`);
             const verifChk = document.getElementById(`inst-verif-${idx}`);
             const remInput = document.getElementById(`inst-rem-${idx}`);
@@ -7946,7 +10418,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/update_instrument', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -7958,6 +10430,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function savePressureSwitch(arg1, arg2, arg3) {
+            if (!checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Save Pressure Switch Calibration')) return;
             let type = 'pressure_switch';
             let key = arg1;
             let idx = arg2;
@@ -8008,7 +10481,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/update_instrument', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -8024,6 +10497,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveNewWO() {
+            if (!checkRolePermission(['general', 'all'], 'Add Work Order')) return;
             const noWo = (document.getElementById('new-wo-code').value || '').trim();
             const desc = (document.getElementById('new-wo-desc').value || '').trim();
             const area = (document.getElementById('new-wo-area').value || '').trim();
@@ -8039,7 +10513,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/add_wo', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, no_wo: noWo, job_description: desc, area: area, pic: pic, tanggal_schedule: sched, checklist_str: checklistStr})
                 });
                 const result = await res.json();
@@ -8061,12 +10535,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function deleteWO(noWo) {
+            if (!checkRolePermission(['general', 'all'], 'Delete Work Order')) return;
             if(!confirm(`Are you sure you want to delete Work Order ${noWo} and all of its subtasks?`)) return;
 
             try {
                 const res = await fetch('/api/delete_wo', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, no_wo: noWo})
                 });
                 const result = await res.json();
@@ -8078,6 +10553,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function addSubtask(noWo, mode = 'manual') {
+            if (!checkRolePermission(['general', 'all'], 'Add Subtask to Work Order')) return;
             let subTask = '';
             let defaultPic = '';
             
@@ -8109,7 +10585,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/add_subtask', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, no_wo: noWo, sub_task: subTask, pic: defaultPic})
                 });
                 const result = await res.json();
@@ -8127,12 +10603,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function deleteSubtask(noWo, subTask) {
+            if (!checkRolePermission(['general', 'all'], 'Delete Subtask')) return;
             if(!confirm(`Delete sub-task "${subTask}" from ${noWo}?`)) return;
 
             try {
                 const res = await fetch('/api/delete_subtask', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, no_wo: noWo, sub_task: subTask})
                 });
                 const result = await res.json();
@@ -8144,6 +10621,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveNewActuator() {
+            if (!checkRolePermission(['actuator', 'general', 'all'], 'Add Actuator')) return;
             const eqId = (document.getElementById('new-act-id').value || '').trim();
             const desc = (document.getElementById('new-act-desc').value || '').trim();
             const area = (document.getElementById('new-act-area').value || '').trim();
@@ -8159,7 +10637,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/add_actuator', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, equipment_id: eqId, equipment_description: desc, area: area, kks: kks, pic: pic, no_wo: noWo})
                 });
                 const result = await res.json();
@@ -8181,12 +10659,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function deleteActuator(eqId) {
+            if (!checkRolePermission(['actuator', 'general', 'all'], 'Delete Actuator')) return;
             if(!confirm(`Are you sure you want to delete Actuator Valve ${eqId}?`)) return;
 
             try {
                 const res = await fetch('/api/delete_actuator', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, equipment_id: eqId})
                 });
                 const result = await res.json();
@@ -8198,6 +10677,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveNewInstrument() {
+            if (!checkRolePermission(['instrument', 'transmitter', 'general', 'all'], 'Add Instrument')) return;
             const type = document.getElementById('new-inst-type').value;
             const desc = (document.getElementById('new-inst-desc').value || '').trim();
             const kks = (document.getElementById('new-inst-kks').value || '').trim();
@@ -8221,7 +10701,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/add_instrument', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({
                         unit: currentUnit,
                         type: type,
@@ -8289,24 +10769,41 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if(btn) btn.innerHTML = isPassword ? Icons.eyeOff : Icons.eye;
         }
 
-        function submitMasterPassword(e) {
+        async function submitMasterPassword(e) {
             if(e) e.preventDefault();
             const input = document.getElementById('master-pwd-input');
             const err = document.getElementById('master-pwd-error');
             const val = (input ? input.value : '').trim();
+            if(!val) return;
 
-            if(MASTER_PASSWORDS.includes(val.toLowerCase()) || val === 'eic123' || val === 'admin123') {
-                isScopeMasterUnlocked = true;
-                sessionStorage.setItem('eic_scope_unlocked', 'true');
-                closeMasterPasswordModal();
-                showToast('✓ Master EIC Edit Access Unlocked!', 'success');
-                renderTabContent();
-            } else {
-                if(err) err.style.display = 'block';
-                if(input) {
-                    input.classList.add('shake-error');
-                    setTimeout(() => input.classList.remove('shake-error'), 500);
-                    input.select();
+            try {
+                const res = await fetch('/api/verify_master_password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password: val })
+                });
+                const data = await res.json();
+                if(data.status === 'success') {
+                    isScopeMasterUnlocked = true;
+                    sessionStorage.setItem('eic_scope_unlocked', 'true');
+                    closeMasterPasswordModal();
+                    showToast('✓ Master EIC Edit Access Unlocked!', 'success');
+                    renderTabContent();
+                } else {
+                    if(err) {
+                        err.innerText = data.message || 'Incorrect master password.';
+                        err.style.display = 'block';
+                    }
+                    if(input) {
+                        input.classList.add('shake-error');
+                        setTimeout(() => input.classList.remove('shake-error'), 500);
+                        input.select();
+                    }
+                }
+            } catch(e) {
+                if(err) {
+                    err.innerText = 'Network error verifying password.';
+                    err.style.display = 'block';
                 }
             }
         }
@@ -8323,6 +10820,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         let rolloverUploadedBase64 = '';
 
         function openRolloverAuthModal() {
+            if (!checkRolePermission(['all'], 'Annual Outage Rollover')) return;
             const modal = document.getElementById('rollover-auth-modal');
             const input = document.getElementById('rollover-pwd-input');
             const err = document.getElementById('rollover-pwd-error');
@@ -8355,22 +10853,39 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             if(btn) btn.innerHTML = isPassword ? Icons.eyeOff : Icons.eye;
         }
 
-        function submitRolloverAuth(e) {
+        async function submitRolloverAuth(e) {
             if(e) e.preventDefault();
             const input = document.getElementById('rollover-pwd-input');
             const err = document.getElementById('rollover-pwd-error');
             const val = (input ? input.value : '').trim();
+            if(!val) return;
 
-            if(MASTER_PASSWORDS.includes(val.toLowerCase()) || val === 'eic123' || val === 'admin123' || val === 'admin@msw') {
-                verifiedRolloverPassword = val;
-                closeRolloverAuthModal();
-                openRolloverWizard();
-            } else {
-                if(err) err.style.display = 'block';
-                if(input) {
-                    input.classList.add('shake-error');
-                    setTimeout(() => input.classList.remove('shake-error'), 500);
-                    input.select();
+            try {
+                const res = await fetch('/api/verify_master_password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password: val })
+                });
+                const data = await res.json();
+                if(data.status === 'success') {
+                    verifiedRolloverPassword = val;
+                    closeRolloverAuthModal();
+                    openRolloverWizard();
+                } else {
+                    if(err) {
+                        err.innerText = data.message || 'Incorrect master password.';
+                        err.style.display = 'block';
+                    }
+                    if(input) {
+                        input.classList.add('shake-error');
+                        setTimeout(() => input.classList.remove('shake-error'), 500);
+                        input.select();
+                    }
+                }
+            } catch(e) {
+                if(err) {
+                    err.innerText = 'Network error verifying password.';
+                    err.style.display = 'block';
                 }
             }
         }
@@ -8502,36 +11017,36 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const prefixNew = (document.getElementById('rollover-prefix-new').value || '').trim();
 
             if(methodChoice === 'excel_upload' && !rolloverUploadedBase64) {
-                alert('Silakan pilih file Excel template mapping terlebih dahulu atau gunakan metode Ganti Pola Prefix!');
+                alert('Please upload a mapping Excel file or use prefix pattern method.');
                 return;
             }
             if(methodChoice === 'prefix_replace' && (!prefixOld || !prefixNew)) {
-                alert('Silakan isi Prefix WO Lama dan Prefix WO Baru!');
+                alert('Please enter both Old and New WO prefixes.');
                 return;
             }
 
             const startDate = document.getElementById('rollover-start-date').value;
             const finishDate = document.getElementById('rollover-finish-date').value;
             if(!startDate || !finishDate) {
-                alert('Silakan pilih Outage Start Date dan Outage Finish Date untuk jadwal S-Curve tahun baru!');
+                alert('Please select Outage Start and Finish dates.');
                 return;
             }
 
             const archiveLabel = (document.getElementById('rollover-archive-label').value || 'Annual_Outage').trim();
 
-            const confirmMsg = `PERINGATAN KONFIRMASI!\n\nApakah Anda yakin ingin mengeksekusi Outage Rollover untuk Unit: ${units.join(', ')}?\n\n` +
-                               `• Data saat ini akan diarsipkan otomatis ke folder Archive/\n` +
-                               `• Nomor WO akan diperbarui\n` +
-                               `• Seluruh progress akan DI-RESET ke 0% (SCHED-OK)\n` +
-                               `• Jadwal Outage baru: ${startDate} s/d ${finishDate}\n\n` +
-                               `Ketik 'OK' atau klik OK untuk melanjutkan.`;
+            const confirmMsg = `CONFIRMATION REQUIRED\n\nExecute Outage Rollover for Unit: ${units.join(', ')}?\n\n` +
+                               `• Current data will be automatically backed up to Archive/\n` +
+                               `• WO numbers will be remapped\n` +
+                               `• All progress will be RESET to 0% (SCHED-OK)\n` +
+                               `• New Outage schedule: ${startDate} to ${finishDate}\n\n` +
+                               `Click OK to proceed.`;
             
             if(!confirm(confirmMsg)) return;
 
             const btn = document.getElementById('btn-execute-rollover');
             const origHtml = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = `<svg class="ui-icon sm spin" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Memproses Rollover & Backup...`;
+            btn.innerHTML = `<svg class="ui-icon sm spin" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg> Processing Rollover...`;
 
             try {
                 const payload = {
@@ -8555,7 +11070,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
                 const res = await fetch('/api/rollover_outage', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const data = await res.json();
@@ -8563,27 +11078,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 if(data.status === 'success') {
                     closeRolloverWizard();
                     const s = data.stats || {};
-                    let msg = `✓ OUTAGE ROLLOVER BERHASIL!\n\n` +
+                    let msg = `✓ OUTAGE ROLLOVER COMPLETED\n\n` +
                               `• Unit: ${units.join(', ')}\n` +
-                              `• WO Diperbarui: ${s.wos_updated} WO\n` +
-                              `• Subtasks Diremap: ${s.subtasks_remapped} Tasks\n`;
+                              `• WOs Updated: ${s.wos_updated}\n` +
+                              `• Subtasks Remapped: ${s.subtasks_remapped}\n`;
                     if(s.areas_updated) {
-                        msg += `• Area Diperbarui: ${s.areas_updated} WO Area\n`;
+                        msg += `• Areas Updated: ${s.areas_updated}\n`;
                     }
                     if(s.descriptions_updated) {
-                        msg += `• Deskripsi Diperbarui: ${s.descriptions_updated} WO Deskripsi\n`;
+                        msg += `• Descriptions Updated: ${s.descriptions_updated}\n`;
                     }
-                    msg += `• Data Lama Diarsipkan ke: ${s.archive_dir || 'Archive/'}\n` +
-                           `• Seluruh progress telah di-reset ke 0%.`;
+                    msg += `• Backup Saved to: ${s.archive_dir || 'Archive/'}\n` +
+                           `• All progress reset to 0%.`;
                     alert(msg);
                     showToast('✓ Outage Rollover successfully executed! Refreshing...', 'success', 5000);
                     await loadData();
                 } else {
-                    alert('Gagal mengeksekusi Rollover: ' + (data.message || 'Unknown error'));
+                    alert('Failed to execute Rollover: ' + (data.message || 'Unknown error'));
                     showToast('Error: ' + data.message, 'error', 4000);
                 }
             } catch(e) {
-                alert('Terjadi kesalahan jaringan atau server: ' + e.message);
+                alert('Network or server error: ' + e.message);
                 showToast('Rollover Error: ' + e.message, 'error', 4000);
             } finally {
                 btn.disabled = false;
@@ -8606,7 +11121,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/add_scope', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, kategori: cat, nama_equipment: eq, tipe_scope: type, pic: pic})
                 });
                 const result = await res.json();
@@ -8630,7 +11145,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/delete_instrument', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, type: type, no: key, kks: key})
                 });
                 const result = await res.json();
@@ -8653,7 +11168,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/add_pic', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, pic_name: picName})
                 });
                 const result = await res.json();
@@ -8672,7 +11187,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/delete_pic', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, pic_name: picName})
                 });
                 const result = await res.json();
@@ -8702,7 +11217,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/update_scope', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -8722,7 +11237,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/delete_scope', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({unit: currentUnit, row_index: item.row_index !== undefined ? item.row_index : sIdx})
                 });
                 const result = await res.json();
@@ -8849,7 +11364,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             try {
                 const res = await fetch('/api/update_outage_dates', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({
                         unit: currentUnit,
                         start_date: startVal,
@@ -8913,7 +11428,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 const payload = { unit: currentUnit, no_wo: noWo, action: action };
                 const res = await fetch('/api/batch_toggle_subtasks', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 });
                 const result = await res.json();
@@ -9321,8 +11836,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
         }
 
-        window.onload = function() {
+        window.onload = async function() {
             initTheme();
+            await initAuth();
             loadData();
         };
     </script>
@@ -9353,16 +11869,16 @@ def run_server():
         httpd = ReuseTCPServer(server_address, EICMonitoringHandler)
     except OSError as e:
         print(f"==================================================================")
-        print(f" [INFO] Server Outage EIC Monitoring sudah aktif di port {PORT}!")
-        print(f" Akses dari PC ini  : http://localhost:{PORT}")
-        print(f" Akses dari PC lain : http://{local_ip}:{PORT}")
+        print(f" [INFO] Outage EIC Monitoring Server is running on port {PORT}")
+        print(f" Local access  : http://localhost:{PORT}")
+        print(f" Network access: http://{local_ip}:{PORT}")
         print(f"==================================================================")
         return
 
     print(f"==================================================================")
     print(f" OUTAGE EIC WORK ORDER MONITORING SYSTEM SERVER IS RUNNING!")
-    print(f" * Akses dari PC ini (Lokal)     : http://localhost:{PORT}")
-    print(f" * Akses dari PC lain (LAN/Wi-Fi): http://{local_ip}:{PORT}")
+    print(f" * Local access     : http://localhost:{PORT}")
+    print(f" * Network (LAN)    : http://{local_ip}:{PORT}")
     print(f" Shared Directory                 : {BASE_DIR}")
     print(f"==================================================================")
     try:

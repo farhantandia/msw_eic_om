@@ -120,10 +120,27 @@ Comprehensive calibration tracking segmented into 3 sub-tabs:
 
 ---
 
-### 3.5. Master EIC Scope Security & Password Authorization
+### 3.5. Role-Based Access Control (RBAC) & Menu Isolation
+The system enforces strict role-based menu isolation and backend permission guards. All user credentials and passwords are strictly separated from source code and GitHub, managed locally via `auth_users.json` (ignored by Git):
+
+| Role | Username | Credentials Source | Visible Menus & Capabilities |
+| :--- | :--- | :--- | :--- |
+| **Instrument** | `inst_user` | Configured in `auth_users.json` | **Instruments Only** (PTX, TTX, PSW calibration & file uploads). WO, Actuator, Scope, and Archive tabs are completely hidden. |
+| **Actuator** | `act_user` | Configured in `auth_users.json` | **Actuators Only** (Valves milestone tracking & findings). WO, Instrument, Scope, and Archive tabs are completely hidden. |
+| **General** | `gen_user` | Configured in `auth_users.json` | **Work Orders + Actuators + Instruments** (Full operational CRUD). Scope Master and Data Archive tabs remain hidden. |
+| **Administrator** | `admin` | Configured in `auth_users.json` | **All Features** (General + Scope Master + Data Archive + Outage Rollover + User Management). |
+
+- **Security & Git Isolation:** Credentials (`auth_users.json`), active sessions (`active_sessions.json`), and environment files (`.env`) are excluded from version control via `.gitignore`. A template `auth_users.example.json` and `.env.example` are provided for deployment.
+- **Admin Protection:** Quick-select credentials buttons on the login screen are restricted to operators only. Administrators must explicitly enter their credentials.
+- **48-Hour Session Retention:** Authenticated sessions persist securely for 2x24 hours (`session_id` cookies).
+- **Guest Read-Only Mode:** Unauthenticated visitors can view Work Orders, Actuators, and Instruments in read-only mode without edit or delete actions.
+
+---
+
+### 3.6. Master EIC Scope Security & Password Authorization
 Protects master data integrity:
 - **Locked Mode by Default:** Master PIC personnel and Job Scope definitions are locked to prevent unauthorized modification. Edit and delete buttons are cleanly hidden.
-- **Password Authorization Modal:** Authorizes supervisors using master credentials (`eic123`, `admin123`, `msweic`, etc.) with an interactive SVG Eye toggle.
+- **Password Authorization Modal:** Authorizes supervisors using credentials configured in `auth_users.json` (or `MASTER_PASSWORD` in `.env`) with an interactive SVG Eye toggle.
 - **Safe Relock:** Easily relock access with 1 click after modifications are saved.
 
 ---

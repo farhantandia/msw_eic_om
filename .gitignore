@@ -31,6 +31,15 @@ scratch/
 *.tmp
 *.temp
 
+# Security, Sessions & Credentials (NEVER COMMIT TO GIT/GITHUB)
+auth_users.json
+active_sessions.json
+.env
+*.env
+*.pem
+*.key
+credentials.json
+
 # IDE & Editor Settings
 .vscode/
 .idea/
