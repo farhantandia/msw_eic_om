@@ -2724,6 +2724,33 @@ def create_archive_snapshot(data):
         except Exception as e:
             return {"status": "error", "message": f"Failed to create archive snapshot: {str(e)}"}
 
+def delete_archive_snapshot(data):
+    raw_folder = str(data.get("folder", "")).strip()
+    if not raw_folder:
+        return {"status": "error", "message": "Missing folder parameter."}
+    
+    # Security check: Prevent path traversal
+    clean_folder = os.path.basename(raw_folder)
+    target_path = os.path.join(ARCHIVE_DIR, clean_folder)
+    
+    real_archive = os.path.realpath(ARCHIVE_DIR)
+    real_target = os.path.realpath(target_path)
+    if not real_target.startswith(real_archive) or real_target == real_archive:
+        return {"status": "error", "message": "Invalid folder path. Access denied."}
+    
+    if not os.path.exists(real_target):
+        return {"status": "error", "message": f"Snapshot '{clean_folder}' does not exist."}
+    
+    with FILE_LOCK:
+        try:
+            if os.path.isdir(real_target):
+                shutil.rmtree(real_target)
+            else:
+                os.remove(real_target)
+            return {"status": "success", "message": f"Archive snapshot '{clean_folder}' deleted successfully."}
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to delete archive snapshot: {str(e)}"}
+
 class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -2763,11 +2790,11 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
 
         elif path == "/api/archive_list":
             sess = get_session_from_handler(self)
-            if not sess or sess.get("role") != "all":
+            if not sess or sess.get("role") not in ["all", "admin", "general"]:
                 self.send_response(403)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(json.dumps({"status": "error", "message": "Akses Dibatasi: Khusus role All Feature (Admin)."}).encode('utf-8'))
+                self.wfile.write(json.dumps({"status": "error", "message": "Access Denied: Requires General or Administrator role."}).encode('utf-8'))
                 return
             archives = get_archive_list()
             self.send_response(200)
@@ -2779,7 +2806,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
 
         elif path == "/api/download_archive_file":
             sess = get_session_from_handler(self)
-            if not sess or sess.get("role") != "all":
+            if not sess or sess.get("role") not in ["all", "admin", "general"]:
                 self.send_response(403)
                 self.end_headers()
                 return
@@ -2802,7 +2829,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
 
         elif path == "/api/download_archive_zip":
             sess = get_session_from_handler(self)
-            if not sess or sess.get("role") != "all":
+            if not sess or sess.get("role") not in ["all", "admin", "general"]:
                 self.send_response(403)
                 self.end_headers()
                 return
@@ -3046,6 +3073,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             "/api/add_scope": ["all", "admin"],
             "/api/rollover_outage": ["all", "admin"],
             "/api/create_archive_snapshot": ["all", "admin"],
+            "/api/delete_archive_snapshot": ["all", "admin"],
         }
 
         if parsed.path in ROLE_RULES:
@@ -3100,6 +3128,7 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             "/api/upload_calibration_file": handle_calibration_file_upload,
             "/api/delete_calibration_file": handle_calibration_file_delete,
             "/api/create_archive_snapshot": create_archive_snapshot,
+            "/api/delete_archive_snapshot": delete_archive_snapshot,
             "/api/update_outage_dates": save_outage_dates_update,
             "/api/update_wo": save_wo_update,
             "/api/quick_toggle_subtask": save_quick_subtask_toggle,
@@ -5620,6 +5649,29 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             color: #ffffff;
             transform: translateY(-1px);
         }
+        .btn-archive-del {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #f87171;
+            padding: 9px 14px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .btn-archive-del:hover {
+            background: rgba(239, 68, 68, 0.25);
+            border-color: #ef4444;
+            color: #ffffff;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+        }
 
         /* --- CALIBRATION MODAL FILE LIST --- */
         .calib-files-container {
@@ -6240,6 +6292,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Delete Archive Snapshot Confirmation Modal -->
+    <div class="modal-overlay" id="delete-snapshot-modal">
+        <div class="modal-content" style="max-width: 480px; text-align:center; padding:30px 24px;">
+            <div style="width:60px; height:60px; border-radius:50%; background:rgba(239,68,68,0.12); color:#ef4444; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+                <svg class="ui-icon" style="width:30px; height:30px;" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+            </div>
+            <h3 style="font-size:1.2rem; font-weight:800; color:var(--text-main); margin-bottom:8px;">Delete Archive Snapshot?</h3>
+            <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:14px;">
+                Are you sure you want to permanently delete this snapshot archive:
+            </p>
+            <div id="delete-snapshot-name" style="font-family:'JetBrains Mono',monospace; font-weight:700; font-size:0.84rem; color:#ef4444; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); padding:10px 14px; border-radius:8px; margin-bottom:18px; word-break:break-all;">
+                Snapshot_Folder_Name
+            </div>
+            <p style="font-size:0.76rem; color:var(--text-muted); margin-bottom:24px;">
+                All backed up Excel files and finding photos in this snapshot will be permanently removed.
+            </p>
+            <div style="display:flex; justify-content:center; gap:12px;">
+                <button type="button" class="page-btn" onclick="closeDeleteSnapshotModal()">Cancel</button>
+                <button type="button" id="btn-confirm-delete-snapshot" class="btn-archive-del" style="padding:10px 22px; font-size:0.86rem; background:#ef4444; color:#ffffff; border-color:#dc2626;" onclick="executeDeleteSnapshot()">
+                    <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    <span>Confirm Delete</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Auth Permission Required Modal -->
     <div class="modal-overlay" id="auth-alert-modal">
         <div class="modal-content" style="max-width: 460px; text-align:center; padding:32px 24px;">
@@ -6703,12 +6781,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     switchTab('actuator');
                 }
             } else if (isGeneral) {
-                // Role General: WO, Actuator, and Instrument (NO Scope, NO Archive)
+                // Role General: WO, Actuator, Instrument, Scope (view-only), and Archive (download-only)
                 if (woTab) woTab.style.display = 'inline-flex';
                 if (actTab) actTab.style.display = 'inline-flex';
                 if (instTab) instTab.style.display = 'inline-flex';
-                if (scopeTab) scopeTab.style.display = 'none';
-                if (archiveTab) archiveTab.style.display = 'none';
+                if (scopeTab) scopeTab.style.display = 'inline-flex';
+                if (archiveTab) archiveTab.style.display = 'inline-flex';
 
                 if (sideWo) sideWo.style.display = 'block';
                 if (sideAct) sideAct.style.display = 'block';
@@ -6717,10 +6795,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 if (stickyWo) stickyWo.style.display = 'inline-block';
                 if (stickyAct) stickyAct.style.display = 'inline-block';
                 if (stickyInst) stickyInst.style.display = 'inline-block';
-
-                if (currentTab === 'scope' || currentTab === 'archive') {
-                    switchTab('wo');
-                }
             } else if (isAdmin) {
                 // Role Admin: ALL 5 tabs visible
                 if (woTab) woTab.style.display = 'inline-flex';
@@ -7180,7 +7254,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         let archiveListCache = [];
 
         async function renderArchiveTab(container) {
-            if (!currentUser || currentUser.role !== 'all') {
+            const role = currentUser ? (currentUser.role || 'guest') : 'guest';
+            const isAdmin = role === 'all' || role === 'admin';
+            const isGeneral = role === 'general';
+            if (!isAdmin && !isGeneral) {
                 container.innerHTML = `
                     <div style="text-align:center; padding:64px 24px; background:var(--bg-card); border-radius:var(--radius-lg); border:1px solid var(--border-color); max-width:620px; margin:40px auto; box-shadow:var(--shadow-card);">
                         <div style="width:72px; height:72px; border-radius:50%; background:rgba(239,68,68,0.12); color:#ef4444; display:flex; align-items:center; justify-content:center; margin:0 auto 20px;">
@@ -7188,12 +7265,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         </div>
                         <h2 style="font-size:1.35rem; font-weight:800; color:var(--text-main); margin-bottom:8px;">Data Archive Restricted</h2>
                         <p style="color:var(--text-muted); font-size:0.9rem; line-height:1.6; margin-bottom:24px;">
-                            Historical data archives and Excel workbooks are restricted to <strong>All Feature (Administrator)</strong> role.
+                            Historical data archives are accessible to <strong>General Operator</strong> (download) and <strong>Administrator</strong> roles.
                         </p>
                         <div style="display:flex; justify-content:center; gap:12px;">
                             <a href="/login" class="btn-save" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
                                 <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
-                                Sign In as Admin
+                                Sign In
                             </a>
                             <button type="button" class="page-btn" onclick="switchTab('wo')">Back to Work Orders</button>
                         </div>
@@ -7226,6 +7303,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         function buildArchivePageHTML(container) {
+            const role = currentUser ? (currentUser.role || 'guest') : 'guest';
+            const isAdmin = role === 'all' || role === 'admin';
             const totalArchives = archiveListCache.length;
             let totalBytes = 0;
             archiveListCache.forEach(a => totalBytes += (a.total_size || 0));
@@ -7244,12 +7323,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             Historical outage Excel workbooks and documentation backups.
                         </p>
                     </div>
-                    <div>
-                        <button class="btn-save" onclick="openArchiveSnapshotModal()" style="display:inline-flex; align-items:center; gap:8px; padding:10px 18px; font-size:0.88rem; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
-                            <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
-                            Create Snapshot
-                        </button>
-                    </div>
+                    ${isAdmin ? `
+                        <div>
+                            <button class="btn-save" onclick="openArchiveSnapshotModal()" style="display:inline-flex; align-items:center; gap:8px; padding:10px 18px; font-size:0.88rem; box-shadow:0 4px 14px rgba(2,132,199,0.35);">
+                                <svg class="ui-icon sm" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                                Create Snapshot
+                            </button>
+                        </div>
+                    ` : `
+                        <div style="display:inline-flex; align-items:center; gap:6px; background:var(--bg-sub); border:1px solid var(--border-color); padding:6px 14px; border-radius:20px; font-size:0.75rem; font-weight:700; color:var(--text-muted);">
+                            <span>📥</span> Download-Only Access (General Technician)
+                        </div>
+                    `}
                 </div>
 
                 <div class="archive-stats-row">
@@ -7344,11 +7429,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                 </div>
                             </div>
 
-                            <div>
-                                <a href="/api/download_archive_zip?folder=${encodeURIComponent(item.folder_name)}" class="btn-archive-zip">
+                            <div style="display:flex; gap:8px; margin-top:14px;">
+                                <a href="/api/download_archive_zip?folder=${encodeURIComponent(item.folder_name)}" class="btn-archive-zip" style="margin-top:0; flex:1;">
                                     <svg class="ui-icon xs" style="width:14px; height:14px;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                     Download ZIP
                                 </a>
+                                ${isAdmin ? `
+                                    <button type="button" class="btn-archive-del" onclick="confirmDeleteSnapshot('${encodeURIComponent(item.folder_name)}')" title="Delete Snapshot">
+                                        <svg class="ui-icon xs" style="width:14px; height:14px;" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                        Delete
+                                    </button>
+                                ` : ''}
                             </div>
                         </div>
                     `;
@@ -7374,6 +7465,57 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         function closeArchiveSnapshotModal() {
             const modal = document.getElementById('archive-snapshot-modal');
             if (modal) modal.classList.remove('active');
+        }
+
+        let pendingDeleteSnapshotFolder = null;
+
+        function confirmDeleteSnapshot(encodedFolder) {
+            if (!checkRolePermission(['all'], 'Delete Archive Snapshot')) return;
+            const folderName = decodeURIComponent(encodedFolder);
+            pendingDeleteSnapshotFolder = folderName;
+            const nameEl = document.getElementById('delete-snapshot-name');
+            if (nameEl) nameEl.innerText = folderName;
+            const modal = document.getElementById('delete-snapshot-modal');
+            if (modal) modal.classList.add('active');
+        }
+
+        function closeDeleteSnapshotModal() {
+            pendingDeleteSnapshotFolder = null;
+            const modal = document.getElementById('delete-snapshot-modal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        async function executeDeleteSnapshot() {
+            if (!pendingDeleteSnapshotFolder) return;
+            const folder = pendingDeleteSnapshotFolder;
+            const btn = document.getElementById('btn-confirm-delete-snapshot');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = `<svg class="ui-icon spin" style="width:16px; height:16px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg> <span>Deleting...</span>`;
+            }
+
+            try {
+                const res = await fetch('/api/delete_archive_snapshot', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ folder: folder })
+                });
+                const data = await res.json();
+                closeDeleteSnapshotModal();
+                if (data.status === 'success') {
+                    showToast(`✓ Snapshot '${folder}' deleted successfully.`, 'success');
+                    renderArchiveTab(document.getElementById('tab-content'));
+                } else {
+                    alert(`Failed to delete snapshot: ${data.message}`);
+                }
+            } catch (e) {
+                alert(`Error deleting snapshot: ${e.message}`);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = `<svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> <span>Confirm Delete</span>`;
+                }
+            }
         }
 
         async function submitArchiveSnapshot(e) {
@@ -7429,7 +7571,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 tab = 'instrument';
             } else if (isActuator) {
                 tab = 'actuator';
-            } else if (!isAdmin && (tab === 'scope' || tab === 'archive')) {
+            } else if (!isAdmin && !isGeneral && (tab === 'scope' || tab === 'archive')) {
                 tab = 'wo';
             }
             currentTab = tab;
@@ -8607,32 +8749,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         /* ---------------- SCOPE & PIC MASTER RENDERING ---------------- */
         function renderScopeMaster(container) {
+            const role = currentUser ? (currentUser.role || 'guest') : 'guest';
+            const isAdmin = role === 'all' || role === 'admin';
+
             let html = `
             <div style="display:flex; flex-direction:column; gap:16px;">
-                <!-- Master Protection & Security Status Banner -->
-                <div class="scope-lock-banner ${isScopeMasterUnlocked ? 'unlocked' : 'locked'}">
-                    <div style="display:flex; align-items:center; gap:12px;">
-                        <div class="lock-icon-circle ${isScopeMasterUnlocked ? 'open' : ''}">${isScopeMasterUnlocked ? Icons.unlock : Icons.lock}</div>
-                        <div>
-                            <div style="font-size:0.94rem; font-weight:800; color:${isScopeMasterUnlocked ? '#10b981' : 'var(--text-main)'};">
-                                ${isScopeMasterUnlocked ? 'Edit Mode Active' : 'Protected Mode'}
-                            </div>
-                            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
-                                ${isScopeMasterUnlocked ? 'Full access to edit PIC personnel and Master Scope definitions.' : 'Master scope is protected. Enter password to unlock editing.'}
-                            </div>
-                        </div>
-                    </div>
+                <div class="archive-hero-banner" style="margin-bottom:0;">
                     <div>
-                        ${isScopeMasterUnlocked ? `
-                            <button class="page-btn" style="padding:7px 16px; font-size:0.82rem; color:#f43f5e; border-color:rgba(244,63,94,0.4); font-weight:700;" onclick="lockMasterScope()" title="Lock edit access">
-                                ${Icons.lock} Lock
-                            </button>
-                        ` : `
-                            <button class="btn-save" style="padding:8px 18px; font-size:0.84rem; background:linear-gradient(135deg, #6366f1, #4f46e5); box-shadow:0 4px 12px rgba(99,102,241,0.3);" onclick="openMasterPasswordModal()" title="Enter authorization password to unlock edit access">
-                                ${Icons.unlock} Unlock
-                            </button>
-                        `}
+                        <div style="display:inline-flex; align-items:center; gap:8px; background:rgba(99,102,241,0.12); color:#818cf8; border:1px solid rgba(99,102,241,0.25); padding:4px 12px; border-radius:20px; font-size:0.75rem; font-weight:800; margin-bottom:8px;">
+                            ${Icons.clipboard} MASTER EIC SCOPE & PIC
+                        </div>
+                        <h2 style="font-size:1.45rem; font-weight:800; color:var(--text-main); margin-bottom:4px;">Master PIC & Job Scope</h2>
+                        <p style="font-size:0.85rem; color:var(--text-muted); max-width:620px;">
+                            Central registry of EIC responsible personnel and standardized outage scope definitions.
+                        </p>
                     </div>
+                    ${!isAdmin ? `
+                        <div style="display:inline-flex; align-items:center; gap:6px; background:var(--bg-sub); border:1px solid var(--border-color); padding:6px 14px; border-radius:20px; font-size:0.75rem; font-weight:700; color:var(--text-muted);">
+                            <span>👁️</span> Read-Only View (Administrator edit required)
+                        </div>
+                    ` : ''}
                 </div>
 
                 <!-- Master PIC Card -->
@@ -8642,18 +8778,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     </div>
                     <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:16px;">Registered EIC responsible personnel. All PIC dropdown selectors across Work Orders, Actuators, & Instruments automatically sync from this master list.</p>
                     
-                    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:${isScopeMasterUnlocked ? '18px' : '4px'};">
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:${isAdmin ? '18px' : '4px'};">
                         ${(fullData.pics || []).map(p => `
                             <span style="padding:6px 14px; background:var(--bg-sub); border:1px solid var(--border-color); border-radius:20px; font-size:0.85rem; font-weight:600; color:var(--text-main); display:inline-flex; align-items:center; gap:8px; box-shadow:0 2px 5px rgba(0,0,0,0.05);">
                                 ${p}
-                                ${isScopeMasterUnlocked ? `
+                                ${isAdmin ? `
                                     <button style="background:none; border:none; color:#f43f5e; cursor:pointer; font-weight:700; font-size:0.85rem; padding:0 2px;" title="Delete PIC" onclick="deletePic('${(p||'').toString().replace(/'/g, "\\'")}')">&times;</button>
                                 ` : ''}
                             </span>
                         `).join('')}
                     </div>
 
-                    ${isScopeMasterUnlocked ? `
+                    ${isAdmin ? `
                         <div style="display:flex; gap:10px; max-width:480px;">
                             <input type="text" id="new-pic-input" class="filter-input" placeholder="New PIC name..." style="flex-grow:1;">
                             <button class="btn-save" onclick="addNewPic()" style="display:inline-flex; align-items:center; gap:6px;">${Icons.plus} Add PIC</button>
@@ -8665,12 +8801,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 <div style="background:var(--bg-card); border-radius:var(--radius-lg); padding:22px; border:1px solid var(--border-color);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
                         <h3 style="color:var(--primary); font-size:1.1rem; font-weight:800; margin:0; display:inline-flex; align-items:center; gap:8px;">${Icons.clipboard} Master Outage Job Scope</h3>
-                        ${isScopeMasterUnlocked ? `
+                        ${isAdmin ? `
                             <button class="page-btn" style="font-size:0.82rem; font-weight:700; display:inline-flex; align-items:center; gap:6px;" onclick="toggleAccordion('add-scope-form')">${openCardIds.has('add-scope-form') ? 'Close Form' : Icons.plus + ' Add Scope'}</button>
                         ` : ''}
                     </div>
                     
-                    ${isScopeMasterUnlocked ? `
+                    ${isAdmin ? `
                         <div id="add-scope-form" class="accordion-form ${openCardIds.has('add-scope-form') ? 'open' : ''}" style="${openCardIds.has('add-scope-form') ? 'display:block;' : ''}; margin-bottom:18px;">
                             <div class="form-grid">
                                 <div class="form-group">
@@ -8712,7 +8848,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <th>Equipment / Job Scope</th>
                                     <th>Scope Type</th>
                                     <th>Person in Charge (PIC)</th>
-                                    ${isScopeMasterUnlocked ? '<th>Actions</th>' : ''}
+                                    ${isAdmin ? '<th>Actions</th>' : ''}
                                 </tr>
                             </thead>
                             <tbody>
@@ -8720,14 +8856,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                     <tr>
                                         <td style="font-size:0.8rem; color:var(--text-muted); font-weight:600;">${s.kategori || '-'}</td>
                                         <td>
-                                            ${isScopeMasterUnlocked ? `
+                                            ${isAdmin ? `
                                                 <input type="text" id="scope-eq-${sIdx}" class="filter-input" value="${(s.nama_equipment || '').replace(/"/g, '&quot;')}" style="padding:5px 8px; font-size:0.85rem; width:100%; min-width:200px;" onblur="saveScopeRow(${sIdx})">
                                             ` : `
                                                 <div style="font-weight:600; font-size:0.88rem; color:var(--text-main);">${s.nama_equipment || '-'}</div>
                                             `}
                                         </td>
                                         <td>
-                                            ${isScopeMasterUnlocked ? `
+                                            ${isAdmin ? `
                                                 <select id="scope-type-${sIdx}" class="filter-input" style="padding:5px 8px; font-size:0.85rem;" onchange="saveScopeRow(${sIdx})">
                                                     <option value="Vendor" ${s.tipe_scope==='Vendor'?'selected':''}>Vendor</option>
                                                     <option value="MSW" ${s.tipe_scope==='MSW'?'selected':''}>MSW</option>
@@ -8738,7 +8874,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                             `}
                                         </td>
                                         <td>
-                                            ${isScopeMasterUnlocked ? `
+                                            ${isAdmin ? `
                                                 <select id="scope-pic-${sIdx}" class="filter-input" style="padding:5px 8px; font-size:0.85rem;" onchange="saveScopeRow(${sIdx})">
                                                     <option value="">Select PIC...</option>
                                                     ${(fullData.pics || []).map(p => {
@@ -8750,7 +8886,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                                                 <span style="font-size:0.85rem; font-weight:600; color:var(--primary);">${s.pic || '-'}</span>
                                             `}
                                         </td>
-                                        ${isScopeMasterUnlocked ? `
+                                        ${isAdmin ? `
                                             <td>
                                                 <div style="display:flex; gap:6px;">
                                                     <button class="btn-save" style="padding:5px 12px; font-size:0.78rem; display:inline-flex; align-items:center; gap:4px;" onclick="saveScopeRow(${sIdx})">${Icons.save} Save</button>
@@ -11117,7 +11253,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveNewScope() {
-            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
+            if (!checkRolePermission(['all'], 'Modify Master Scope & PIC')) return;
             const cat = (document.getElementById('new-scope-cat').value || '').trim();
             const eq = (document.getElementById('new-scope-eq').value || '').trim();
             const type = document.getElementById('new-scope-type').value;
@@ -11167,7 +11303,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function addNewPic() {
-            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
+            if (!checkRolePermission(['all'], 'Modify Master Scope & PIC')) return;
             const input = document.getElementById('new-pic-input');
             const picName = (input ? input.value : '').trim();
             if(!picName) {
@@ -11191,7 +11327,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function deletePic(picName) {
-            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
+            if (!checkRolePermission(['all'], 'Modify Master Scope & PIC')) return;
             if(!confirm(`Are you sure you want to delete PIC "${picName}" from Master PICs?`)) return;
 
             try {
@@ -11209,7 +11345,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function saveScopeRow(sIdx) {
-            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
+            if (!checkRolePermission(['all'], 'Modify Master Scope & PIC')) return;
             const item = (fullData.scope_master || [])[sIdx];
             if(!item) return;
             const eqInput = document.getElementById(`scope-eq-${sIdx}`);
@@ -11239,7 +11375,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         async function deleteScopeRow(sIdx) {
-            if(!isScopeMasterUnlocked) { openMasterPasswordModal(); return; }
+            if (!checkRolePermission(['all'], 'Modify Master Scope & PIC')) return;
             const item = (fullData.scope_master || [])[sIdx];
             if(!item) return;
             if(!confirm(`Are you sure you want to delete Master Scope row "${item.nama_equipment || ''}"?`)) return;

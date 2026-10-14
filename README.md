@@ -127,21 +127,21 @@ The system enforces strict role-based menu isolation and backend permission guar
 | :--- | :--- | :--- | :--- |
 | **Instrument** | `inst_user` | Configured in `auth_users.json` | **Instruments Only** (PTX, TTX, PSW calibration & file uploads). WO, Actuator, Scope, and Archive tabs are completely hidden. |
 | **Actuator** | `act_user` | Configured in `auth_users.json` | **Actuators Only** (Valves milestone tracking & findings). WO, Instrument, Scope, and Archive tabs are completely hidden. |
-| **General** | `gen_user` | Configured in `auth_users.json` | **Work Orders + Actuators + Instruments** (Full operational CRUD). Scope Master and Data Archive tabs remain hidden. |
-| **Administrator** | `admin` | Configured in `auth_users.json` | **All Features** (General + Scope Master + Data Archive + Outage Rollover + User Management). |
+| **General** | `gen_user` | Configured in `auth_users.json` | **WO + Actuators + Instruments + PIC / Scope (Read-Only) + Data Archive (Download-Only)**. Operates all task checklists, inspects PIC scopes, and downloads archive snapshots/Excel files. Cannot create/delete snapshots or trigger outage rollovers. |
+| **Administrator** | `admin` | Configured in `auth_users.json` | **All Features** (General + Scope Master direct edit without extra password lock + Data Archive full snapshot management & deletion + Outage Rollover). |
 
 - **Security & Git Isolation:** Credentials (`auth_users.json`), active sessions (`active_sessions.json`), and environment files (`.env`) are excluded from version control via `.gitignore`. A template `auth_users.example.json` and `.env.example` are provided for deployment.
 - **Admin Protection:** Quick-select credentials buttons on the login screen are restricted to operators only. Administrators must explicitly enter their credentials.
 - **48-Hour Session Retention:** Authenticated sessions persist securely for 2x24 hours (`session_id` cookies).
-- **Guest Read-Only Mode:** Unauthenticated visitors can view Work Orders, Actuators, and Instruments in read-only mode without edit or delete actions.
+- **Guest Read-Only Mode:** Unauthenticated visitors can view Work Orders, Actuators, and Instruments in read-only mode without edit or delete actions. Scope Master and Data Archive remain restricted.
 
 ---
 
-### 3.6. Master EIC Scope Security & Password Authorization
-Protects master data integrity:
-- **Locked Mode by Default:** Master PIC personnel and Job Scope definitions are locked to prevent unauthorized modification. Edit and delete buttons are cleanly hidden.
-- **Password Authorization Modal:** Authorizes supervisors using credentials configured in `auth_users.json` (or `MASTER_PASSWORD` in `.env`) with an interactive SVG Eye toggle.
-- **Safe Relock:** Easily relock access with 1 click after modifications are saved.
+### 3.6. Master EIC Scope Governance & Frictionless Administration
+Simplifies Master Scope and PIC personnel management while ensuring system integrity:
+- **Direct Administrator Control:** The legacy password lock modal has been removed. Authenticated Administrators have immediate, seamless control to add PICs, delete PICs, register new Scope items, and update existing entries without extra password prompts.
+- **Read-Only Transparency for General Users:** General technicians can review all registered PIC personnel and equipment scopes for reference without risk of accidental data mutation.
+- **Safe State Indication:** Clear badges indicate `👁️ Read-Only View (Administrator edit required)` to technicians and operators.
 
 ---
 
