@@ -34,6 +34,8 @@ scratch/
 # Security, Sessions & Credentials (NEVER COMMIT TO GIT/GITHUB)
 auth_users.json
 active_sessions.json
+unit_config.json
+unit_config.json.tmp
 .env
 *.env
 *.pem

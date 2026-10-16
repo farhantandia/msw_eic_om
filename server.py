@@ -84,6 +84,108 @@ def is_valid_master_password(password):
         return True
     return False
 
+# ---------------- ACTIVE OUTAGE UNIT CONFIGURATION (ADMIN-CONTROLLED) ----------------
+UNIT_CONFIG_FILE = os.path.join(BASE_DIR, "unit_config.json")
+UNIT_CONFIG_LOCK = threading.Lock()
+VALID_UNITS = [1, 2]
+
+# POST endpoints that mutate unit-scoped data (payload carries "unit").
+# Updates to a closed unit are rejected for non-admin users when lock_closed_units is enabled.
+UNIT_SCOPED_MUTATION_PATHS = {
+    "/api/update_instrument", "/api/quick_toggle_instrument", "/api/bulk_update_instruments",
+    "/api/add_instrument", "/api/delete_instrument",
+    "/api/upload_calibration_file", "/api/delete_calibration_file",
+    "/api/update_actuator", "/api/quick_toggle_actuator", "/api/add_actuator", "/api/delete_actuator",
+    "/api/update_wo", "/api/quick_toggle_subtask", "/api/batch_toggle_subtasks",
+    "/api/add_wo", "/api/delete_wo", "/api/add_subtask", "/api/delete_subtask",
+    "/api/edit_details", "/api/upload_finding_photo", "/api/delete_finding_photo",
+    "/api/update_outage_dates", "/api/add_pic", "/api/delete_pic",
+    "/api/update_scope", "/api/delete_scope", "/api/add_scope",
+}
+
+def _default_unit_config():
+    return {
+        "open_units": list(VALID_UNITS),
+        "default_unit": VALID_UNITS[0],
+        "lock_closed_units": True,
+        "hide_closed_units": False,
+        "updated_at": "",
+        "updated_by": "",
+    }
+
+def _normalize_unit_config(raw):
+    """Sanitizes a unit config dict, guaranteeing at least one open unit and a valid default unit."""
+    cfg = _default_unit_config()
+    if not isinstance(raw, dict):
+        return cfg
+    open_units = []
+    for u in raw.get("open_units", cfg["open_units"]) or []:
+        try:
+            u = int(u)
+        except (TypeError, ValueError):
+            continue
+        if u in VALID_UNITS and u not in open_units:
+            open_units.append(u)
+    open_units.sort()
+    if not open_units:
+        open_units = list(VALID_UNITS)
+    try:
+        default_unit = int(raw.get("default_unit", open_units[0]))
+    except (TypeError, ValueError):
+        default_unit = open_units[0]
+    if default_unit not in open_units:
+        default_unit = open_units[0]
+    cfg.update({
+        "open_units": open_units,
+        "default_unit": default_unit,
+        "lock_closed_units": bool(raw.get("lock_closed_units", cfg["lock_closed_units"])),
+        "hide_closed_units": bool(raw.get("hide_closed_units", cfg["hide_closed_units"])),
+        "updated_at": str(raw.get("updated_at", "") or ""),
+        "updated_by": str(raw.get("updated_by", "") or ""),
+    })
+    return cfg
+
+def get_unit_config():
+    """Loads the admin-defined active outage unit configuration (falls back to all units open)."""
+    with UNIT_CONFIG_LOCK:
+        try:
+            if os.path.exists(UNIT_CONFIG_FILE):
+                with open(UNIT_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    return _normalize_unit_config(json.load(f))
+        except Exception as e:
+            print(f"[UNIT CONFIG] Error reading {UNIT_CONFIG_FILE}: {e}")
+    return _default_unit_config()
+
+def save_unit_config(data, updated_by=""):
+    """Validates and persists the active outage unit configuration submitted by an administrator."""
+    if not isinstance(data, dict):
+        return {"status": "error", "message": "Invalid configuration payload."}
+    requested = []
+    for u in data.get("open_units", []) or []:
+        try:
+            u = int(u)
+        except (TypeError, ValueError):
+            continue
+        if u in VALID_UNITS and u not in requested:
+            requested.append(u)
+    if not requested:
+        return {"status": "error", "message": "At least one unit must remain open."}
+    payload = dict(data)
+    payload["open_units"] = requested
+    payload["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload["updated_by"] = updated_by or ""
+    cfg = _normalize_unit_config(payload)
+    with UNIT_CONFIG_LOCK:
+        try:
+            tmp_path = UNIT_CONFIG_FILE + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=4, ensure_ascii=False)
+            os.replace(tmp_path, UNIT_CONFIG_FILE)
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to save unit configuration: {e}"}
+    opened = " & ".join(f"Unit {u}" for u in cfg["open_units"])
+    return {"status": "success", "message": f"Active outage unit updated: {opened}.", "config": cfg}
+
 def safe_save_workbook(wb, path):
     try:
         wb.save(path)
@@ -2788,6 +2890,15 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"authenticated": False, "role": "guest"}, ensure_ascii=False).encode('utf-8'))
             return
 
+        elif path == "/api/unit_config":
+            cfg = get_unit_config()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success", "config": cfg}, ensure_ascii=False).encode('utf-8'))
+            return
+
         elif path == "/api/archive_list":
             sess = get_session_from_handler(self)
             if not sess or sess.get("role") not in ["all", "admin", "general"]:
@@ -3044,6 +3155,48 @@ class EICMonitoringHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(res).encode('utf-8'))
             return
+
+        elif parsed.path == "/api/admin/unit_config":
+            sess = get_session_from_handler(self)
+            if not sess:
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "Authentication required. Please sign in as Administrator.", "code": "AUTH_REQUIRED"}).encode('utf-8'))
+                return
+            if sess.get("role") not in ["all", "admin"]:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": "Access Denied: Only Administrator can change active outage units.", "code": "ROLE_DENIED"}).encode('utf-8'))
+                return
+            res = save_unit_config(body, sess.get("username") or sess.get("name") or "")
+            self.send_response(200 if res.get("status") == "success" else 400)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode('utf-8'))
+            return
+
+        # Closed-unit guard: block non-admin updates on units closed by Administrator
+        if parsed.path in UNIT_SCOPED_MUTATION_PATHS:
+            unit_cfg = get_unit_config()
+            try:
+                req_unit = int(body.get("unit", 1))
+            except (TypeError, ValueError):
+                req_unit = 1
+            if unit_cfg.get("lock_closed_units") and req_unit not in unit_cfg.get("open_units", VALID_UNITS):
+                g_sess = get_session_from_handler(self)
+                if not g_sess or g_sess.get("role") not in ["all", "admin"]:
+                    opened = " & ".join(f"Unit {u}" for u in unit_cfg.get("open_units", []))
+                    self.send_response(403)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "status": "error",
+                        "message": f"Unit {req_unit} is currently closed by Administrator (read-only). Updates are only allowed on the active outage unit: {opened}.",
+                        "code": "UNIT_CLOSED"
+                    }, ensure_ascii=False).encode('utf-8'))
+                    return
 
         # RBAC Permission Checking
         ROLE_RULES = {
@@ -3867,6 +4020,49 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         .unit-switcher { display: flex; background: var(--bg-sub); border-radius: var(--radius-md); padding: 4px; border: 1px solid var(--border-color); }
         .unit-btn { padding: 8px 22px; border: none; background: transparent; color: var(--text-muted); font-weight: 700; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.2s; font-size: 0.88rem; }
         .unit-btn.active { background: var(--primary); color: #fff; box-shadow: 0 2px 12px var(--primary-glow); }
+
+        /* Admin-controlled active outage unit */
+        .unit-switcher-wrap { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .unit-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+        .unit-btn .unit-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-finish); box-shadow: 0 0 0 0 rgba(16,185,129,0.6); animation: unitPulse 1.8s infinite; }
+        .unit-btn.active .unit-live-dot { background: #fff; }
+        .unit-btn.unit-closed { opacity: 0.55; }
+        .unit-btn.unit-closed:hover { opacity: 0.85; }
+        .unit-btn.unit-closed.active { background: linear-gradient(135deg, #64748b, #475569); box-shadow: 0 2px 10px rgba(100,116,139,0.35); opacity: 1; }
+        .unit-btn .unit-lock-ic { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+        @keyframes unitPulse { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.55); } 70% { box-shadow: 0 0 0 6px rgba(16,185,129,0); } 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); } }
+        .unit-config-gear { width: 34px; height: 34px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-sub); color: var(--text-muted); cursor: pointer; display: none; align-items: center; justify-content: center; transition: all 0.25s; }
+        .unit-config-gear:hover { color: var(--primary); border-color: var(--primary); transform: rotate(45deg); }
+        .unit-config-gear svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        .unit-static-badge { display: none; align-items: center; gap: 8px; padding: 7px 18px; background: var(--bg-sub); border: 1.5px solid var(--border-color); border-radius: var(--radius-md); font-weight: 800; font-size: 0.88rem; color: var(--text-main); letter-spacing: 0.5px; user-select: none; box-shadow: 0 2px 10px rgba(0,0,0,0.18); }
+        .unit-static-badge .unit-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-finish); box-shadow: 0 0 0 0 rgba(16,185,129,0.6); animation: unitPulse 1.8s infinite; }
+        .unit-readonly-badge { display: none; align-items: center; gap: 5px; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.3px; text-transform: uppercase; color: #f59e0b; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.35); padding: 2px 9px; border-radius: 12px; }
+        .unit-readonly-badge svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2.4; }
+        .unit-cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .unit-cfg-card { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: var(--radius-md); border: 1.5px solid var(--border-color); background: var(--bg-sub); cursor: pointer; transition: all 0.2s; user-select: none; }
+        .unit-cfg-card:hover { border-color: var(--primary); }
+        .unit-cfg-card input { position: absolute; opacity: 0; pointer-events: none; }
+        .unit-cfg-card .ucc-title { font-weight: 800; font-size: 1rem; color: var(--text-main); display: flex; align-items: center; justify-content: space-between; }
+        .unit-cfg-card .ucc-state { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
+        .unit-cfg-card .ucc-check { width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--border-color); display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .unit-cfg-card .ucc-check svg { width: 12px; height: 12px; stroke: #fff; fill: none; stroke-width: 3.5; opacity: 0; }
+        .unit-cfg-card.checked { border-color: var(--status-finish); background: rgba(16,185,129,0.08); box-shadow: 0 0 0 3px rgba(16,185,129,0.12); }
+        .unit-cfg-card.checked .ucc-check { background: var(--status-finish); border-color: var(--status-finish); }
+        .unit-cfg-card.checked .ucc-check svg { opacity: 1; }
+        .unit-cfg-card.checked .ucc-state { color: var(--status-finish); }
+        .unit-cfg-section-label { font-size: 0.78rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 18px 0 8px; }
+        .unit-cfg-default { display: flex; gap: 8px; }
+        .unit-cfg-default label { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px; border-radius: var(--radius-sm); border: 1.5px solid var(--border-color); background: var(--bg-sub); font-weight: 700; font-size: 0.85rem; color: var(--text-main); cursor: pointer; transition: all 0.2s; }
+        .unit-cfg-default label.selected { border-color: var(--primary); color: var(--primary); background: rgba(99,102,241,0.1); }
+        .unit-cfg-default label.disabled { opacity: 0.4; cursor: not-allowed; }
+        .unit-cfg-default input { display: none; }
+        .unit-cfg-toggle { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-sub); margin-bottom: 8px; cursor: pointer; }
+        .unit-cfg-toggle input { margin-top: 3px; accent-color: var(--primary); width: 16px; height: 16px; cursor: pointer; }
+        .unit-cfg-toggle .uct-title { font-weight: 700; font-size: 0.85rem; color: var(--text-main); }
+        .unit-cfg-toggle .uct-desc { font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; }
+        .unit-cfg-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 12px; }
+        .unit-cfg-error { color: #f43f5e; font-size: 0.78rem; font-weight: 700; margin-top: 8px; display: none; }
+        @media (max-width: 520px) { .unit-cfg-grid { grid-template-columns: 1fr; } }
         
         .theme-toggle-btn {
             padding: 8px 12px;
@@ -6040,6 +6236,70 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Active Outage Unit Settings Modal (Admin only) -->
+    <div class="modal-overlay" id="unit-config-modal">
+        <div class="modal-content" style="max-width: 520px; padding: 24px;">
+            <div class="modal-header" style="margin-bottom: 14px;">
+                <div>
+                    <h3 style="color:var(--primary); font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+                        <svg class="ui-icon lg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        Active Outage Unit Settings
+                    </h3>
+                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Choose which unit is currently in outage. Users will be taken directly to the open unit without selecting it manually.</div>
+                </div>
+                <button class="modal-close" onclick="closeUnitConfigModal()">&times;</button>
+            </div>
+
+            <div class="unit-cfg-section-label" style="margin-top:4px;">Open Units</div>
+            <div class="unit-cfg-grid">
+                <label class="unit-cfg-card" id="ucfg-card-1">
+                    <input type="checkbox" id="ucfg-open-1" value="1" onchange="onUnitConfigFormChange()">
+                    <div class="ucc-title">Unit 1 <span class="ucc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span></div>
+                    <div class="ucc-state" id="ucfg-state-1">Closed</div>
+                </label>
+                <label class="unit-cfg-card" id="ucfg-card-2">
+                    <input type="checkbox" id="ucfg-open-2" value="2" onchange="onUnitConfigFormChange()">
+                    <div class="ucc-title">Unit 2 <span class="ucc-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span></div>
+                    <div class="ucc-state" id="ucfg-state-2">Closed</div>
+                </label>
+            </div>
+
+            <div id="ucfg-default-wrap">
+                <div class="unit-cfg-section-label">Default Unit on Open (when both are open)</div>
+                <div class="unit-cfg-default">
+                    <label id="ucfg-default-label-1"><input type="radio" name="ucfg-default" value="1" onchange="onUnitConfigFormChange()">Unit 1</label>
+                    <label id="ucfg-default-label-2"><input type="radio" name="ucfg-default" value="2" onchange="onUnitConfigFormChange()">Unit 2</label>
+                </div>
+            </div>
+
+            <div class="unit-cfg-section-label">Closed Unit Behaviour</div>
+            <label class="unit-cfg-toggle">
+                <input type="checkbox" id="ucfg-lock">
+                <div>
+                    <div class="uct-title">Lock closed units (read-only)</div>
+                    <div class="uct-desc">Non-admin users cannot update checklists or data on a closed unit. Recommended.</div>
+                </div>
+            </label>
+            <label class="unit-cfg-toggle">
+                <input type="checkbox" id="ucfg-hide">
+                <div>
+                    <div class="uct-title">Hide closed unit buttons for non-admin</div>
+                    <div class="uct-desc">Technicians only see the open unit. Admin always sees all units.</div>
+                </div>
+            </label>
+
+            <div class="unit-cfg-error" id="ucfg-error">At least one unit must remain open.</div>
+            <div class="unit-cfg-meta" id="ucfg-meta"></div>
+
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
+                <button type="button" class="page-btn" onclick="closeUnitConfigModal()">Cancel</button>
+                <button type="button" class="btn-save" id="ucfg-save-btn" onclick="saveUnitConfig()" style="padding:9px 20px; display:inline-flex; align-items:center; gap:6px;">
+                    <svg class="ui-icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg> Save Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Annual Outage Rollover & Reset Wizard Modal -->
     <div class="modal-overlay" id="rollover-wizard-modal">
         <div class="modal-content" style="max-width: 720px; max-height: 90vh; overflow-y: auto; padding: 24px;">
@@ -6376,12 +6636,29 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <!-- Outage Banner & Progress -->
         <div class="outage-banner">
             <div class="outage-info">
-                <div class="unit-switcher">
-                    <button class="unit-btn active" id="btn-unit-1" onclick="switchUnit(1)">UNIT 1</button>
-                    <button class="unit-btn" id="btn-unit-2" onclick="switchUnit(2)">UNIT 2</button>
+                <div class="unit-switcher-wrap">
+                    <!-- Admin Only Switcher & Config -->
+                    <div class="unit-switcher" id="unit-switcher">
+                        <button class="unit-btn active" id="btn-unit-1" onclick="switchUnit(1)">UNIT 1</button>
+                        <button class="unit-btn" id="btn-unit-2" onclick="switchUnit(2)">UNIT 2</button>
+                    </div>
+                    <button type="button" class="unit-config-gear" id="btn-unit-config-gear" onclick="openUnitConfigModal()" title="Active Outage Unit Settings (Admin)" aria-label="Active Outage Unit Settings">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    </button>
+                    <!-- Non-Admin Static Active Unit Indicator -->
+                    <div class="unit-static-badge" id="unit-static-badge" style="display:none;" title="Active Outage Unit determined by Administrator">
+                        <span class="unit-live-dot"></span>
+                        <span id="unit-static-badge-text">UNIT 1</span>
+                    </div>
                 </div>
                 <div>
-                    <div class="outage-title" id="outage-unit-title">Outage EIC Monitoring Progress Unit 1</div>
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <div class="outage-title" id="outage-unit-title">Outage EIC Monitoring Progress Unit 1</div>
+                        <span class="unit-readonly-badge" id="unit-readonly-badge" title="This unit is closed by Administrator. Data can be viewed but not updated.">
+                            <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                            Closed &bull; Read-Only
+                        </span>
+                    </div>
                     <div style="font-size:0.8rem; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;">
                         <span>Seamlessly synchronized with Excel Templates</span>
                         <span style="opacity:0.5;">&bull;</span>
@@ -6671,6 +6948,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 if(txt) txt.innerText = 'Loading...';
             });
             try {
+                await syncUnitConfig();
                 await loadData();
                 showToast('✓ Data refreshed successfully!', 'info');
             } catch(e) {
@@ -6684,12 +6962,296 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
         }
 
-        function switchUnit(unit) {
+        /* ==========================================================================
+           ADMIN-CONTROLLED ACTIVE OUTAGE UNIT
+           ========================================================================== */
+        const ALL_UNITS = [1, 2];
+        const UNIT_SESSION_KEY = 'eic_selected_unit';
+        let unitConfig = { open_units: [1, 2], default_unit: 1, lock_closed_units: true, hide_closed_units: false, updated_at: '', updated_by: '' };
+
+        function isAdminUser() {
+            return !!currentUser && (currentUser.role === 'all' || currentUser.role === 'admin');
+        }
+
+        function getOpenUnits() {
+            const open = (unitConfig && Array.isArray(unitConfig.open_units)) ? unitConfig.open_units.filter(u => ALL_UNITS.includes(u)) : [];
+            return open.length ? open : ALL_UNITS.slice();
+        }
+
+        function getDefaultOpenUnit() {
+            const open = getOpenUnits();
+            return open.includes(unitConfig.default_unit) ? unitConfig.default_unit : open[0];
+        }
+
+        function isUnitOpen(unit) {
+            return getOpenUnits().includes(unit);
+        }
+
+        function isUnitReadOnly(unit) {
+            return !isUnitOpen(unit) && !!unitConfig.lock_closed_units && !isAdminUser();
+        }
+
+        function getVisibleUnits() {
+            if (isAdminUser() || !unitConfig.hide_closed_units) return ALL_UNITS.slice();
+            return ALL_UNITS.filter(isUnitOpen);
+        }
+
+        async function loadUnitConfig() {
+            try {
+                const res = await fetch('/api/unit_config', { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (data && data.config) unitConfig = data.config;
+            } catch (e) {
+                console.warn('Unit config unavailable, falling back to all units open:', e);
+            }
+            return unitConfig;
+        }
+
+        // Picks the unit to show on startup: the admin-defined open unit, so users never select it manually.
+        function resolveInitialUnit() {
+            if (!isAdminUser()) {
+                // Non-admin users are strictly tied to the admin-configured open unit
+                return getDefaultOpenUnit();
+            }
+            const saved = parseInt(sessionStorage.getItem(UNIT_SESSION_KEY), 10);
+            if (getVisibleUnits().includes(saved) && (isUnitOpen(saved) || isAdminUser())) return saved;
+            return getDefaultOpenUnit();
+        }
+
+        // Re-reads the config (e.g. on Refresh) and moves the user if the unit they were updating got closed.
+        async function syncUnitConfig() {
+            const wasOpen = isUnitOpen(currentUnit);
+            await loadUnitConfig();
+            if (!isAdminUser()) {
+                const target = getDefaultOpenUnit();
+                if (target !== currentUnit) {
+                    sessionStorage.removeItem(UNIT_SESSION_KEY);
+                    currentUnit = target;
+                    currentPage = 1;
+                    showToast(`Active outage unit was set by Administrator to Unit ${target}.`, 'info', 4500);
+                }
+            } else {
+                const lostAccess = !getVisibleUnits().includes(currentUnit) || (wasOpen && !isUnitOpen(currentUnit));
+                if (lostAccess) {
+                    const target = getDefaultOpenUnit();
+                    if (target !== currentUnit) {
+                        sessionStorage.removeItem(UNIT_SESSION_KEY);
+                        currentUnit = target;
+                        currentPage = 1;
+                        showToast(`Active outage unit was changed by Administrator. Now showing Unit ${target}.`, 'info', 4500);
+                    }
+                }
+            }
+            renderUnitSwitcher();
+        }
+
+        function renderUnitSwitcher() {
+            const admin = isAdminUser();
+            const switcher = document.getElementById('unit-switcher');
+            const gear = document.getElementById('btn-unit-config-gear');
+            const staticBadge = document.getElementById('unit-static-badge');
+            const staticText = document.getElementById('unit-static-badge-text');
+
+            if (!admin) {
+                // Completely hide switcher buttons and gear shortcut from non-admin users
+                if (switcher) switcher.style.display = 'none';
+                if (gear) gear.style.display = 'none';
+                if (staticBadge) {
+                    staticBadge.style.display = 'inline-flex';
+                    if (staticText) staticText.innerText = `UNIT ${currentUnit}`;
+                }
+            } else {
+                // Admin sees full switcher buttons and gear shortcut
+                if (switcher) switcher.style.display = 'flex';
+                if (gear) gear.style.display = 'inline-flex';
+                if (staticBadge) staticBadge.style.display = 'none';
+
+                const visible = getVisibleUnits();
+                const restricted = getOpenUnits().length < ALL_UNITS.length;
+                const lockSvg = '<svg class="unit-lock-ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>';
+                ALL_UNITS.forEach(u => {
+                    const btn = document.getElementById('btn-unit-' + u);
+                    if (!btn) return;
+                    const open = isUnitOpen(u);
+                    btn.style.display = visible.includes(u) ? '' : 'none';
+                    btn.classList.toggle('active', u === currentUnit);
+                    btn.classList.toggle('unit-closed', !open);
+                    btn.innerHTML = (open ? (restricted ? '<span class="unit-live-dot"></span>' : '') : lockSvg) + 'UNIT ' + u;
+                    btn.title = open
+                        ? `Unit ${u} - Active outage (open for updates)`
+                        : `Unit ${u} - Closed by Administrator${unitConfig.lock_closed_units ? ' (read-only)' : ''}`;
+                });
+            }
+
+            const badge = document.getElementById('unit-readonly-badge');
+            if (badge) {
+                if (isUnitOpen(currentUnit)) {
+                    badge.style.display = 'none';
+                } else {
+                    const label = isUnitReadOnly(currentUnit) ? 'Closed &bull; Read-Only' : (admin ? 'Closed &bull; Admin Access' : 'Closed Unit');
+                    badge.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>' + label;
+                    badge.style.display = 'inline-flex';
+                }
+            }
+        }
+
+        function switchUnit(unit, opts = {}) {
+            if (!isAdminUser() && !opts.force) {
+                // Non-admins cannot switch units manually
+                return;
+            }
+            if (!ALL_UNITS.includes(unit) || !getVisibleUnits().includes(unit)) return;
             currentUnit = unit;
             currentPage = 1;
-            document.getElementById('btn-unit-1').classList.toggle('active', unit === 1);
-            document.getElementById('btn-unit-2').classList.toggle('active', unit === 2);
+            if (!opts.silent) sessionStorage.setItem(UNIT_SESSION_KEY, String(unit));
+            renderUnitSwitcher();
+            if (!opts.silent && isUnitReadOnly(unit)) {
+                showToast(`Unit ${unit} is closed by Administrator - view only.`, 'info', 3500);
+            }
             loadData();
+        }
+
+        function openUnitClosedAlert(actionName) {
+            const titleEl = document.getElementById('auth-alert-title');
+            const msgEl = document.getElementById('auth-alert-msg');
+            const modal = document.getElementById('auth-alert-modal');
+            const opened = getOpenUnits().map(u => 'Unit ' + u).join(' & ');
+            if (titleEl) titleEl.innerText = `Unit ${currentUnit} Is Closed`;
+            if (msgEl) {
+                msgEl.innerHTML = `Action <strong>"${actionName}"</strong> is not available because <strong>Unit ${currentUnit}</strong> has been closed by Administrator (read-only).<br><br>Active outage unit: <strong>${opened}</strong>.`
+                    + (getVisibleUnits().includes(getDefaultOpenUnit()) && getDefaultOpenUnit() !== currentUnit
+                        ? `<br><br><button type="button" class="btn-save" style="padding:8px 16px;" onclick="closeAuthAlertModal(); switchUnit(${getDefaultOpenUnit()});">Go to Unit ${getDefaultOpenUnit()}</button>`
+                        : '');
+            }
+            if (modal) modal.classList.add('active');
+        }
+
+        // Safety net: if the server rejects an update because the unit was closed meanwhile,
+        // notify the user and reload so optimistic UI changes are reverted.
+        (function installUnitClosedInterceptor() {
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = async function(...args) {
+                const res = await nativeFetch(...args);
+                if (res.status === 403) {
+                    try {
+                        const data = await res.clone().json();
+                        if (data && data.code === 'UNIT_CLOSED') {
+                            showToast(data.message, 'error', 5000);
+                            syncUnitConfig().then(() => loadData());
+                        }
+                    } catch (e) {}
+                }
+                return res;
+            };
+        })();
+
+        async function openUnitConfigModal() {
+            if (!checkRolePermission(['all'], 'Active Outage Unit Settings')) return;
+            await loadUnitConfig();
+            ALL_UNITS.forEach(u => {
+                const cb = document.getElementById('ucfg-open-' + u);
+                if (cb) cb.checked = isUnitOpen(u);
+            });
+            const def = document.querySelector(`input[name="ucfg-default"][value="${getDefaultOpenUnit()}"]`);
+            if (def) def.checked = true;
+            const lockEl = document.getElementById('ucfg-lock');
+            const hideEl = document.getElementById('ucfg-hide');
+            if (lockEl) lockEl.checked = !!unitConfig.lock_closed_units;
+            if (hideEl) hideEl.checked = !!unitConfig.hide_closed_units;
+            const meta = document.getElementById('ucfg-meta');
+            if (meta) {
+                meta.innerText = unitConfig.updated_at
+                    ? `Last updated: ${unitConfig.updated_at}${unitConfig.updated_by ? ' by ' + unitConfig.updated_by : ''}`
+                    : 'Not configured yet - all units are open by default.';
+            }
+            onUnitConfigFormChange();
+            const modal = document.getElementById('unit-config-modal');
+            if (modal) modal.classList.add('open');
+        }
+
+        function closeUnitConfigModal() {
+            const modal = document.getElementById('unit-config-modal');
+            if (modal) modal.classList.remove('open', 'active');
+        }
+
+        function getUnitConfigFormOpenUnits() {
+            return ALL_UNITS.filter(u => {
+                const cb = document.getElementById('ucfg-open-' + u);
+                return cb && cb.checked;
+            });
+        }
+
+        function onUnitConfigFormChange() {
+            const opened = getUnitConfigFormOpenUnits();
+            ALL_UNITS.forEach(u => {
+                const isOn = opened.includes(u);
+                const card = document.getElementById('ucfg-card-' + u);
+                if (card) card.classList.toggle('checked', isOn);
+                const st = document.getElementById('ucfg-state-' + u);
+                if (st) st.innerText = isOn ? 'Open - Outage Active' : 'Closed';
+                const lbl = document.getElementById('ucfg-default-label-' + u);
+                const radio = lbl ? lbl.querySelector('input') : null;
+                if (lbl) lbl.classList.toggle('disabled', !isOn);
+                if (radio) radio.disabled = !isOn;
+            });
+            const checkedDef = document.querySelector('input[name="ucfg-default"]:checked');
+            if (opened.length && (!checkedDef || !opened.includes(parseInt(checkedDef.value, 10)))) {
+                const r = document.querySelector(`input[name="ucfg-default"][value="${opened[0]}"]`);
+                if (r) r.checked = true;
+            }
+            ALL_UNITS.forEach(u => {
+                const lbl = document.getElementById('ucfg-default-label-' + u);
+                const radio = lbl ? lbl.querySelector('input') : null;
+                if (lbl) lbl.classList.toggle('selected', !!(radio && radio.checked));
+            });
+            const wrap = document.getElementById('ucfg-default-wrap');
+            if (wrap) wrap.style.display = opened.length > 1 ? '' : 'none';
+            const err = document.getElementById('ucfg-error');
+            if (err) err.style.display = opened.length ? 'none' : 'block';
+            const saveBtn = document.getElementById('ucfg-save-btn');
+            if (saveBtn) {
+                saveBtn.disabled = !opened.length;
+                saveBtn.style.opacity = opened.length ? '' : '0.5';
+            }
+        }
+
+        async function saveUnitConfig() {
+            const opened = getUnitConfigFormOpenUnits();
+            if (!opened.length) { onUnitConfigFormChange(); return; }
+            const defEl = document.querySelector('input[name="ucfg-default"]:checked');
+            const payload = {
+                open_units: opened,
+                default_unit: defEl ? parseInt(defEl.value, 10) : opened[0],
+                lock_closed_units: !!(document.getElementById('ucfg-lock') || {}).checked,
+                hide_closed_units: !!(document.getElementById('ucfg-hide') || {}).checked
+            };
+            const btn = document.getElementById('ucfg-save-btn');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('/api/admin/unit_config', {
+                    method: 'POST',
+                    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.status !== 'success') throw new Error(data.message || 'Failed to save settings.');
+                unitConfig = data.config;
+                closeUnitConfigModal();
+                showToast('✓ ' + data.message, 'success', 3500);
+                // Move the admin to the unit technicians will now land on
+                const target = (getOpenUnits().length === 1 || !isUnitOpen(currentUnit)) ? getDefaultOpenUnit() : currentUnit;
+                if (target !== currentUnit) {
+                    sessionStorage.removeItem(UNIT_SESSION_KEY);
+                    switchUnit(target, { silent: true });
+                } else {
+                    renderUnitSwitcher();
+                }
+            } catch (e) {
+                showToast(e.message, 'error', 4500);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
         }
 
         
@@ -6871,6 +7433,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             Reports
                         </button>
                         ${isAdmin ? `
+                            <button class="menu-item-btn" onclick="closeHeaderMenu(); openUnitConfigModal();">
+                                <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                                Active Unit Settings
+                            </button>
                             <button class="menu-item-btn" onclick="closeHeaderMenu(); openRolloverAuthModal();">
                                 <svg class="ui-icon xs" style="width:15px; height:15px;" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><polyline points="3 3 3 8 8 8"></polyline><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><polyline points="16 21 21 21 21 16"></polyline></svg>
                                 Rollover
@@ -6920,6 +7486,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     `;
                 }
             }
+            renderUnitSwitcher();
         }
 
         function toggleHeaderMenu(event) {
@@ -6976,9 +7543,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 return false;
             }
             if (currentUser.role === 'all' || currentUser.role === 'admin') return true;
-            if (allowedRoles.includes(currentUser.role)) return true;
-            if (allowedRoles.includes('instrument') && currentUser.role === 'transmitter') return true;
-            if (allowedRoles.includes('transmitter') && currentUser.role === 'instrument') return true;
+            const roleAllowed = allowedRoles.includes(currentUser.role)
+                || (allowedRoles.includes('instrument') && currentUser.role === 'transmitter')
+                || (allowedRoles.includes('transmitter') && currentUser.role === 'instrument');
+            if (roleAllowed) {
+                // Unit closed by Administrator: block edits client-side before any optimistic UI change
+                if (isUnitReadOnly(currentUnit)) {
+                    openUnitClosedAlert(actionName);
+                    return false;
+                }
+                return true;
+            }
             
             openAuthAlertModal(allowedRoles, actionName, false);
             return false;
@@ -7583,7 +8158,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             const viewSwitcher = document.getElementById('view-switcher-box');
             if (viewSwitcher) viewSwitcher.style.display = (tab === 'scope' || tab === 'archive') ? 'none' : 'flex';
             const filterBar = document.querySelector('.filter-toolbar');
-            if (filterBar) filterBar.style.display = (tab === 'archive') ? 'none' : 'block';
+            if (filterBar) filterBar.style.display = (tab === 'scope' || tab === 'archive') ? 'none' : '';
             renderTabContent();
         }
 
@@ -11984,7 +12559,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         window.onload = async function() {
             initTheme();
-            await initAuth();
+            await Promise.all([initAuth(), loadUnitConfig()]);
+            // Land directly on the admin-defined active outage unit (no manual selection needed)
+            currentUnit = resolveInitialUnit();
+            renderUnitSwitcher();
             loadData();
         };
     </script>
